@@ -33,6 +33,7 @@ LIBRARY_PATHS = [p for p in [
 INGRESS_PATH = Path("/ingress")
 STATE_DB = Path("/state/curator.db")
 QUARANTINE_PATH = INGRESS_PATH / "quarantine"
+REVIEW_DB = Path("/state/review.db")
 
 NAVIDROME_HOST = os.environ.get("NAVIDROME_HOST", "http://10.10.30.250:4533")
 NAVIDROME_USER = os.environ.get("NAVIDROME_USER", "")
@@ -552,7 +553,7 @@ class IngressHandler(FileSystemEventHandler):
 app = Flask(__name__)
 
 from review_queue import review_bp, REVIEW_DB_KEY
-app.config[REVIEW_DB_KEY] = Path("/state/review.db")
+app.config[REVIEW_DB_KEY] = REVIEW_DB
 app.register_blueprint(review_bp)
 
 @app.route("/health")
@@ -633,7 +634,6 @@ if __name__ == "__main__":
     )
 
     from health_scan import init_review_db, scan_library
-    REVIEW_DB = Path("/state/review.db")
     init_review_db(REVIEW_DB)
     scheduler.add_job(
         lambda: scan_library(LIBRARY_PATHS, REVIEW_DB),

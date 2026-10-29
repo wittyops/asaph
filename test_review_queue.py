@@ -54,6 +54,21 @@ def test_approve_marks_item_resolved(tmp_path):
     conn.close()
     assert status == "resolved"
 
+def test_relabel_is_idempotent_on_double_submit(tmp_path):
+    db_path = tmp_path / "review.db"
+    row_id = _seed_db(db_path, tmp_path)
+    app = _make_app(db_path)
+    client = app.test_client()
+    form = {"artist": "A", "album": "B", "title": "C"}
+    resp1 = client.post(f"/review/{row_id}/relabel", data=form)
+    assert resp1.status_code == 200
+    resp2 = client.post(f"/review/{row_id}/relabel", data=form)
+    assert resp2.status_code == 200
+    conn = sqlite3.connect(str(db_path))
+    reason = conn.execute("SELECT reason FROM review_items WHERE id=?", (row_id,)).fetchone()[0]
+    conn.close()
+    assert reason.count("[relabeled:") == 1
+
 def test_delete_removes_file_and_resolves_row(tmp_path):
     db_path = tmp_path / "review.db"
     row_id = _seed_db(db_path, tmp_path)

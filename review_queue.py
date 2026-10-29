@@ -66,7 +66,7 @@ def relabel(item_id: int):
     conn.execute(
         "UPDATE review_items SET status='resolved', resolved_at=?, "
         "reason=reason || ' [relabeled: ' || ? || '/' || ? || '/' || ? || ']' "
-        "WHERE id=?",
+        "WHERE id=? AND status != 'resolved'",
         (datetime.now(timezone.utc).isoformat(), artist, album, title, item_id),
     )
     conn.commit()

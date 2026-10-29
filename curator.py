@@ -642,6 +642,18 @@ if __name__ == "__main__":
         "cron", day_of_week="sun", hour=3, id="library_health_scan",
     )
 
+    from usenet_poll import poll_searching_items
+    STAGING_ROOT = Path(os.environ.get("STAGING_ROOT", "/staging"))
+    SUPERSEDE_ARCHIVE_ROOT = Path(os.environ.get("SUPERSEDE_ARCHIVE_ROOT", "/library/superseded"))
+    LIBRARY_ROOT_FOR_SUPERSEDE = Path("/library")
+    scheduler.add_job(
+        lambda: poll_searching_items(
+            REVIEW_DB, app.config["LIDARR_BASE"], app.config["LIDARR_API_KEY"],
+            STAGING_ROOT, LIBRARY_ROOT_FOR_SUPERSEDE, SUPERSEDE_ARCHIVE_ROOT,
+        ),
+        "interval", minutes=5, id="usenet_poll",
+    )
+
     scheduler.start()
 
     with state_lock:

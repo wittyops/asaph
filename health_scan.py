@@ -28,6 +28,10 @@ def init_review_db(db_path: Path) -> None:
             resolved_at TEXT
         )
     """)
+    existing_cols = {row[1] for row in conn.execute("PRAGMA table_info(review_items)")}
+    for col in ("artist", "album"):
+        if col not in existing_cols:
+            conn.execute(f"ALTER TABLE review_items ADD COLUMN {col} TEXT")
     conn.commit()
     conn.close()
 

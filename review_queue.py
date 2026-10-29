@@ -114,7 +114,10 @@ def search_usenet(item_id: int):
         current_app.config["LIDARR_API_KEY"],
     )
     conn = _db()
-    conn.execute("UPDATE review_items SET status='searching' WHERE id=?", (item_id,))
+    conn.execute(
+        "UPDATE review_items SET status='searching', artist=?, album=? WHERE id=?",
+        (artist, album, item_id),
+    )
     conn.commit()
     conn.close()
     return "", 200

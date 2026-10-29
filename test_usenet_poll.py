@@ -153,3 +153,30 @@ def test_lidarr_api_error_leaves_row_searching_not_erroring_the_batch(mock_queue
     status = sqlite3.connect(str(db_path)).execute(
         "SELECT status FROM review_items").fetchone()[0]
     assert status == "searching"  # unchanged, not corrupted by the error
+
+
+@patch("usenet_poll._lidarr_album_track_count")
+@patch("usenet_poll._lidarr_queue")
+def test_lidarr_album_lookup_api_error_counts_as_error_not_still_searching(mock_queue, mock_count, tmp_path):
+    """A genuine API failure in the artist/album lookup (e.g. Lidarr auth
+    failure or 500 on /api/v1/artist or /api/v1/album) must surface as an
+    'errors' outcome, not get folded into 'still_searching' alongside the
+    legitimate not-found/ambiguous case."""
+    db_path = tmp_path / "review.db"
+    _seed_searching_row(db_path)
+    mock_queue.return_value = []  # no longer in Lidarr's active queue
+    mock_count.side_effect = Exception("Lidarr API 500")
+
+    staging_dir = tmp_path / "staging" / "Bizzle" / "Nonstop"
+    staging_dir.mkdir(parents=True)
+    _make_valid_flac(staging_dir / "01.flac")
+
+    result = poll_searching_items(
+        db_path, "http://lidarr:8686", "fakekey",
+        tmp_path / "staging", tmp_path / "library", tmp_path / "superseded",
+    )
+
+    assert result == {"resolved": 0, "still_searching": 0, "errors": 1}
+    status = sqlite3.connect(str(db_path)).execute(
+        "SELECT status FROM review_items").fetchone()[0]
+    assert status == "searching"  # unchanged, not corrupted by the error

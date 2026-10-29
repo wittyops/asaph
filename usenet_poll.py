@@ -49,32 +49,35 @@ def _lidarr_album_track_count(lidarr_base: str, api_key: str, artist: str, album
     """Looks up the artist by name, then finds the matching album's
     statistics.trackCount. Returns None if the artist/album can't be
     found unambiguously -- callers must treat None as 'leave it alone',
-    never as zero."""
-    try:
-        artists_resp = requests.get(
-            f"{lidarr_base}/api/v1/artist",
-            headers={"X-Api-Key": api_key},
-            timeout=HTTP_TIMEOUT_S,
-        )
-        artists_resp.raise_for_status()
-        matches = [a for a in artists_resp.json() if a.get("artistName", "").lower() == artist.lower()]
-        if len(matches) != 1:
-            return None
-        artist_id = matches[0]["id"]
+    never as zero.
 
-        albums_resp = requests.get(
-            f"{lidarr_base}/api/v1/album",
-            headers={"X-Api-Key": api_key},
-            params={"artistId": artist_id},
-            timeout=HTTP_TIMEOUT_S,
-        )
-        albums_resp.raise_for_status()
-        album_matches = [a for a in albums_resp.json() if a.get("title", "").lower() == album.lower()]
-        if len(album_matches) != 1:
-            return None
-        return album_matches[0].get("statistics", {}).get("trackCount")
-    except Exception:
+    A genuine API failure (connection error, timeout, non-2xx response) is
+    NOT caught here -- it propagates to the caller so it can be counted as
+    an 'errors' outcome rather than folded into the same bucket as a
+    legitimate not-found/ambiguous lookup. Only the ambiguous-match cases
+    return None."""
+    artists_resp = requests.get(
+        f"{lidarr_base}/api/v1/artist",
+        headers={"X-Api-Key": api_key},
+        timeout=HTTP_TIMEOUT_S,
+    )
+    artists_resp.raise_for_status()
+    matches = [a for a in artists_resp.json() if a.get("artistName", "").lower() == artist.lower()]
+    if len(matches) != 1:
         return None
+    artist_id = matches[0]["id"]
+
+    albums_resp = requests.get(
+        f"{lidarr_base}/api/v1/album",
+        headers={"X-Api-Key": api_key},
+        params={"artistId": artist_id},
+        timeout=HTTP_TIMEOUT_S,
+    )
+    albums_resp.raise_for_status()
+    album_matches = [a for a in albums_resp.json() if a.get("title", "").lower() == album.lower()]
+    if len(album_matches) != 1:
+        return None
+    return album_matches[0].get("statistics", {}).get("trackCount")
 
 
 def poll_searching_items(
@@ -111,7 +114,11 @@ def poll_searching_items(
             summary["still_searching"] += 1
             continue
 
-        expected_count = _lidarr_album_track_count(lidarr_base, api_key, artist, album)
+        try:
+            expected_count = _lidarr_album_track_count(lidarr_base, api_key, artist, album)
+        except Exception:
+            summary["errors"] += 1
+            continue
         if expected_count is None:
             summary["still_searching"] += 1
             continue

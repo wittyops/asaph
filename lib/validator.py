@@ -6,12 +6,15 @@ No network calls here — this module is pure local file analysis.
 """
 from __future__ import annotations
 
+import re
 import subprocess
 import zlib
 from pathlib import Path
 
 MIN_FILE_BYTES = 1024
 DECODE_TIMEOUT_S = 60
+CLIP_PEAK_DB = -0.1
+PEAK_LEVEL_RE = re.compile(r"Peak level dB:\s*(\S+)")
 
 
 def decode_check(path: Path) -> str | None:
@@ -62,8 +65,14 @@ def signal_heuristic_check(path: Path) -> list[dict]:
                 current_time = float(line.split("pts_time:")[1].split()[0])
             except (IndexError, ValueError):
                 pass
-        elif "Peak level dB" in line and "0.0" in line:
-            # Sample(s) pinned at 0dBFS — hard clipping
+        elif m := PEAK_LEVEL_RE.search(line):
+            try:
+                peak_db = float(m.group(1))
+            except ValueError:
+                continue
+            if peak_db < CLIP_PEAK_DB:
+                continue
+            # Sample(s) at or within 0.1 dB of 0dBFS — hard clipping
             suspects.append({
                 "start_s": max(0.0, current_time - 0.5),
                 "end_s": current_time + 0.5,

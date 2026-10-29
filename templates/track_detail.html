@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block content %}
-<h2>Track Detail</h2>
 {% if item %}
+<h2>Track Detail &mdash; {{ item[1] }}</h2>
 <table>
   <tbody>
     <tr><th>Path</th><td>{{ item[1] }}</td></tr>
@@ -9,7 +9,16 @@
     <tr><th>Status</th><td>{{ item[3] }}</td></tr>
   </tbody>
 </table>
+<form hx-post="/review/{{ item[0] }}/relabel" hx-target="body">
+  <input name="artist" placeholder="artist">
+  <input name="album" placeholder="album">
+  <input name="title" placeholder="title">
+  <button type="submit">Save &amp; approve</button>
+</form>
+<button hx-post="/review/{{ item[0] }}/art-candidates" hx-target="#art-candidates">Fetch candidates</button>
+<div id="art-candidates"></div>
 {% else %}
+<h2>Track Detail</h2>
 <p>Item not found.</p>
 {% endif %}
 <p><a href="/review">&larr; Back to queue</a></p>

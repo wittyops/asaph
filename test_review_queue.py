@@ -1,6 +1,7 @@
 import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
+from unittest.mock import patch
 
 import sys
 sys.path.insert(0, str(Path(__file__).parent))
@@ -80,3 +81,23 @@ def test_delete_removes_file_and_resolves_row(tmp_path):
     resp = client.post(f"/review/{row_id}/delete")
     assert resp.status_code == 200
     assert not file_path.exists()
+
+def test_detail_page_renders_for_existing_item(tmp_path):
+    db_path = tmp_path / "review.db"
+    row_id = _seed_db(db_path, tmp_path)
+    app = _make_app(db_path)
+    client = app.test_client()
+    resp = client.get(f"/review/{row_id}")
+    assert resp.status_code == 200
+    assert b"file too small" in resp.data
+
+@patch("review_queue.fetch_cover_art")
+def test_art_select_embeds_chosen_art(mock_fetch, tmp_path):
+    db_path = tmp_path / "review.db"
+    row_id = _seed_db(db_path, tmp_path)
+    mock_fetch.return_value = b"\xff\xd8\xfakejpegbytes"
+    app = _make_app(db_path)
+    client = app.test_client()
+    resp = client.post(f"/review/{row_id}/art-select", data={"mb_release_id": "abc-123"})
+    assert resp.status_code == 200
+    mock_fetch.assert_called_once_with("abc-123")

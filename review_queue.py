@@ -10,6 +10,8 @@ from pathlib import Path
 
 from flask import Blueprint, current_app, render_template, request
 
+from lib.resolver import fetch_cover_art
+
 review_bp = Blueprint("review", __name__, template_folder="templates")
 REVIEW_DB_KEY = "REVIEW_DB_PATH"
 
@@ -99,3 +101,30 @@ def detail(item_id: int):
     ).fetchone()
     conn.close()
     return render_template("track_detail.html", item=row)
+
+
+@review_bp.route("/review/<int:item_id>/art-candidates", methods=["POST"])
+def art_candidates(item_id: int):
+    """Renders the manual candidate-entry form. There is no automated
+    MusicBrainz release search wired up yet (resolver.py only exposes
+    fetch_cover_art(mb_release_id) — a direct Cover Art Archive lookup, not
+    a search), so the "candidate picker" is a release-ID entry form that
+    posts straight to art-select. Revisit if/when a search endpoint lands
+    in lib/resolver.py."""
+    return render_template("_art_candidates.html", item_id=item_id)
+
+
+@review_bp.route("/review/<int:item_id>/art-select", methods=["POST"])
+def art_select(item_id: int):
+    mb_release_id = request.form.get("mb_release_id", "").strip()
+    image_bytes = fetch_cover_art(mb_release_id)
+    if image_bytes is None:
+        return "no art found for that release", 404
+    conn = _db()
+    conn.execute(
+        "UPDATE review_items SET reason = reason || ' [art selected: ' || ? || ']' WHERE id=?",
+        (mb_release_id, item_id),
+    )
+    conn.commit()
+    conn.close()
+    return "", 200

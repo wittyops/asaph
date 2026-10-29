@@ -551,6 +551,10 @@ class IngressHandler(FileSystemEventHandler):
 
 app = Flask(__name__)
 
+from review_queue import review_bp, REVIEW_DB_KEY
+app.config[REVIEW_DB_KEY] = Path("/state/review.db")
+app.register_blueprint(review_bp)
+
 @app.route("/health")
 def api_health():
     with state_lock:

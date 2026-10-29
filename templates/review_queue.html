@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>Curator Review Queue</h2>
+<div style="display:flex;gap:24px;padding:10px 4px;margin-bottom:14px;">
+  <div>Quarantined: <b>{{ counts.quarantined }}</b></div>
+  <div>Pending usenet replacement: <b>{{ counts.pending_usenet }}</b></div>
+  <div>Validated today: <b>{{ counts.validated_today }}</b></div>
+</div>
+<table id="review-table">
+  <tbody>
+    {% for item in items %}
+      {% include "_review_row.html" %}
+    {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

@@ -1,0 +1,9 @@
+<tr id="row-{{ item[0] }}">
+  <td>{{ item[1] }}</td>
+  <td>{{ item[2] }}</td>
+  <td>
+    <button hx-post="/review/{{ item[0] }}/approve" hx-target="#row-{{ item[0] }}" hx-swap="outerHTML">Approve</button>
+    <a href="/review/{{ item[0] }}"><button type="button">Open</button></a>
+    <button hx-post="/review/{{ item[0] }}/delete" hx-target="#row-{{ item[0] }}" hx-swap="outerHTML">Delete</button>
+  </td>
+</tr>

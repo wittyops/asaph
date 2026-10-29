@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>Track Detail</h2>
+{% if item %}
+<table>
+  <tbody>
+    <tr><th>Path</th><td>{{ item[1] }}</td></tr>
+    <tr><th>Reason</th><td>{{ item[2] }}</td></tr>
+    <tr><th>Status</th><td>{{ item[3] }}</td></tr>
+  </tbody>
+</table>
+{% else %}
+<p>Item not found.</p>
+{% endif %}
+<p><a href="/review">&larr; Back to queue</a></p>
+{% endblock %}

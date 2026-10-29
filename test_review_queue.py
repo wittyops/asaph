@@ -101,3 +101,23 @@ def test_art_select_embeds_chosen_art(mock_fetch, tmp_path):
     resp = client.post(f"/review/{row_id}/art-select", data={"mb_release_id": "abc-123"})
     assert resp.status_code == 200
     mock_fetch.assert_called_once_with("abc-123")
+
+@patch("review_queue.trigger_search")
+def test_search_usenet_sets_status_searching(mock_trigger, tmp_path):
+    mock_trigger.return_value = 99
+    db_path = tmp_path / "review.db"
+    row_id = _seed_db(db_path, tmp_path)
+    app = _make_app(db_path)
+    app.config["LIDARR_BASE"] = "http://lidarr:8686"
+    app.config["LIDARR_API_KEY"] = "fakekey"
+    client = app.test_client()
+    resp = client.post(
+        f"/review/{row_id}/search-usenet",
+        data={"artist": "Bizzle", "album": "Nonstop"},
+    )
+    assert resp.status_code == 200
+    import sqlite3
+    status = sqlite3.connect(str(db_path)).execute(
+        "SELECT status FROM review_items WHERE id=?", (row_id,)
+    ).fetchone()[0]
+    assert status == "searching"

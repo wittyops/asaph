@@ -11,6 +11,7 @@ from pathlib import Path
 from flask import Blueprint, current_app, render_template, request
 
 from lib.resolver import fetch_cover_art
+from usenet_flow import trigger_search
 
 review_bp = Blueprint("review", __name__, template_folder="templates")
 REVIEW_DB_KEY = "REVIEW_DB_PATH"
@@ -101,6 +102,22 @@ def detail(item_id: int):
     ).fetchone()
     conn.close()
     return render_template("track_detail.html", item=row)
+
+
+@review_bp.route("/review/<int:item_id>/search-usenet", methods=["POST"])
+def search_usenet(item_id: int):
+    artist = request.form.get("artist", "").strip()
+    album = request.form.get("album", "").strip()
+    trigger_search(
+        artist, album,
+        current_app.config["LIDARR_BASE"],
+        current_app.config["LIDARR_API_KEY"],
+    )
+    conn = _db()
+    conn.execute("UPDATE review_items SET status='searching' WHERE id=?", (item_id,))
+    conn.commit()
+    conn.close()
+    return "", 200
 
 
 @review_bp.route("/review/<int:item_id>/art-candidates", methods=["POST"])

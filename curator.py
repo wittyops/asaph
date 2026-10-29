@@ -554,6 +554,8 @@ app = Flask(__name__)
 
 from review_queue import review_bp, REVIEW_DB_KEY
 app.config[REVIEW_DB_KEY] = REVIEW_DB
+app.config["LIDARR_BASE"] = os.environ.get("LIDARR_BASE", "http://10.10.30.58:8686")
+app.config["LIDARR_API_KEY"] = os.environ.get("LIDARR_API_KEY", "")
 app.register_blueprint(review_bp)
 
 @app.route("/health")

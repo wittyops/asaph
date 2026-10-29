@@ -1,0 +1,29 @@
+# apps/media-ingress/Dockerfile.ingress-sweeper
+#
+# Ephemeral runner for ingress-sweeper.py — no standing container, no
+# standing resource cost. Built once; the cron wrapper does `docker run
+# --rm` against this image each tick, same pattern as the acoustid_lookup.py
+# one-off invocations used for the (now mothballed) Beets pipeline.
+#
+# Deliberately NOT a long-running service: this is the whole point of
+# replacing Beets, which ran as an always-on container with its own
+# resource floor even when idle.
+#
+# mutagen exposes .info.length (seconds) for every container this sweeper
+# touches, so duration-based dedup needs no separate subprocess/tool.
+# ffmpeg is required by lib/validator.py's decode_check/signal_heuristic_check
+# (null-decode + astats), and requests by lib/resolver.py's AcoustID/
+# MusicBrainz/Cover Art Archive lookups.
+FROM python:3.12-slim
+
+RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN pip install --no-cache-dir mutagen==1.47.0 requests==2.32.3
+
+WORKDIR /app
+COPY ingress_sweeper.py /app/ingress_sweeper.py
+COPY lib/ /app/lib/
+
+ENTRYPOINT ["python3", "/app/ingress_sweeper.py"]
+CMD []

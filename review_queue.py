@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from flask import Blueprint, current_app, render_template, request
+from markupsafe import escape
 
 from lib.resolver import fetch_cover_art
 from lib.tagwriter import embed_art, write_tags
@@ -20,6 +21,35 @@ REVIEW_DB_KEY = "REVIEW_DB_PATH"
 
 def _db():
     return sqlite3.connect(str(current_app.config[REVIEW_DB_KEY]))
+
+
+def _categorize(reason: str) -> str:
+    """Maps a free-form reason string to a display category used to color-code
+    the queue. Reasons come from ingress_sweeper.py and health_scan.py as
+    prose, not a fixed enum, so this is substring matching, not a lookup --
+    order matters (corrupt beats metadata when a reason mentions both)."""
+    r = reason.lower()
+    if "ffprobe" in r or "suspect range" in r or "too small" in r or "integrity" in r:
+        return "corrupt"
+    if "missing" in r or "no embedded art" in r or "unreadable tags" in r or "no album art" in r:
+        return "metadata"
+    if "searching" in r or "nzo" in r:
+        return "usenet"
+    return "other"
+
+
+def _row_dict(row: tuple) -> dict:
+    item_id, path, reason, status = row[0], row[1], row[2], row[3]
+    return {
+        "id": item_id,
+        "path": path,
+        "filename": Path(path).name,
+        "reason": reason,
+        "status": status,
+        "category": _categorize(reason),
+        "artist": row[4] if len(row) > 4 else None,
+        "album": row[5] if len(row) > 5 else None,
+    }
 
 
 def _counts(conn):
@@ -40,12 +70,13 @@ def _counts(conn):
 @review_bp.route("/review")
 def review_page():
     conn = _db()
-    items = conn.execute(
-        "SELECT id, path, reason, status FROM review_items "
+    rows = conn.execute(
+        "SELECT id, path, reason, status, artist, album FROM review_items "
         "WHERE status IN ('pending','searching') ORDER BY flagged_at ASC"
     ).fetchall()
     counts = _counts(conn)
     conn.close()
+    items = [_row_dict(r) for r in rows]
     return render_template("review_queue.html", items=items, counts=counts)
 
 
@@ -119,7 +150,8 @@ def detail(item_id: int):
         (item_id,),
     ).fetchone()
     conn.close()
-    return render_template("track_detail.html", item=row)
+    item = _row_dict(row) if row else None
+    return render_template("track_detail.html", item=item)
 
 
 @review_bp.route("/review/<int:item_id>/search-usenet", methods=["POST"])
@@ -139,7 +171,7 @@ def search_usenet(item_id: int):
         # guess at a release. 200, not 404: HTMX only swaps the response
         # into hx-target on a 2xx/3xx, so a 404 here would render nothing
         # and leave the reviewer unsure whether the click even registered.
-        return "<p>No usenet release found for that artist/album.</p>", 200
+        return '<p class="result-msg">No usenet release found for that artist/album.</p>', 200
 
     nzo_id = grab_release(
         release,
@@ -154,7 +186,10 @@ def search_usenet(item_id: int):
     )
     conn.commit()
     conn.close()
-    return f"<p>Queued for download (SABnzbd job {nzo_id}). This item will move to 'searching' and resolve automatically once it completes.</p>", 200
+    return (
+        f'<p class="result-msg">Queued for download (SABnzbd job {escape(nzo_id)}). '
+        "This item will move to 'searching' and resolve automatically once it completes.</p>"
+    ), 200
 
 
 @review_bp.route("/review/<int:item_id>/art-candidates", methods=["POST"])

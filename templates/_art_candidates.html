@@ -1,5 +1,5 @@
-<p>No automated candidate search yet &mdash; enter a MusicBrainz release ID directly:</p>
+<p class="hint">No automated candidate search yet &mdash; enter a MusicBrainz release ID directly:</p>
 <form hx-post="/review/{{ item_id }}/art-select" hx-target="#art-candidates">
-  <input name="mb_release_id" placeholder="MusicBrainz release ID">
-  <button type="submit">Use this release</button>
+  <input type="text" name="mb_release_id" placeholder="MusicBrainz release ID">
+  <button type="submit" class="approve">Use this release</button>
 </form>

@@ -1,9 +1,15 @@
-<tr id="row-{{ item[0] }}">
-  <td>{{ item[1] }}</td>
-  <td>{{ item[2] }}</td>
+<tr id="row-{{ item.id }}">
   <td>
-    <button hx-post="/review/{{ item[0] }}/approve" hx-target="#row-{{ item[0] }}" hx-swap="outerHTML">Approve</button>
-    <a href="/review/{{ item[0] }}"><button type="button">Open</button></a>
-    <button hx-post="/review/{{ item[0] }}/delete" hx-target="#row-{{ item[0] }}" hx-swap="outerHTML">Delete</button>
+    {{ item.filename }}
+    {% if item.artist or item.album %}<br><span class="path">{{ item.artist }}{% if item.artist and item.album %} — {% endif %}{{ item.album }}</span>{% endif %}
+  </td>
+  <td><span class="badge {{ item.category }}">{{ item.category }}</span> {{ item.reason }}</td>
+  <td>
+    {% if item.status == 'searching' %}<span class="badge status-searching">searching</span>{% else %}{{ item.status }}{% endif %}
+  </td>
+  <td>
+    <button class="approve" hx-post="/review/{{ item.id }}/approve" hx-target="#row-{{ item.id }}" hx-swap="outerHTML">Approve</button>
+    <a href="/review/{{ item.id }}"><button type="button" class="primary">Open</button></a>
+    <button class="delete" hx-post="/review/{{ item.id }}/delete" hx-target="#row-{{ item.id }}" hx-swap="outerHTML" hx-confirm="Delete this file permanently?">Delete</button>
   </td>
 </tr>

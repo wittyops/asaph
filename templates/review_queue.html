@@ -1,15 +1,34 @@
 {% extends "base.html" %}
 {% block content %}
 <h2>Curator Review Queue</h2>
-<div style="display:flex;gap:24px;padding:10px 4px;margin-bottom:14px;">
-  <div>Quarantined: <b>{{ counts.quarantined }}</b></div>
-  <div>Pending usenet replacement: <b>{{ counts.pending_usenet }}</b></div>
-  <div>Validated today: <b>{{ counts.validated_today }}</b></div>
+<div class="stats">
+  <div class="stat-card quarantined">
+    <span class="n">{{ counts.quarantined }}</span>
+    <span class="label">Quarantined</span>
+  </div>
+  <div class="stat-card usenet">
+    <span class="n">{{ counts.pending_usenet }}</span>
+    <span class="label">Pending usenet replacement</span>
+  </div>
+  <div class="stat-card validated">
+    <span class="n">{{ counts.validated_today }}</span>
+    <span class="label">Validated today</span>
+  </div>
 </div>
 <table id="review-table">
+  <thead>
+    <tr>
+      <th>File</th>
+      <th>Issue</th>
+      <th>Status</th>
+      <th></th>
+    </tr>
+  </thead>
   <tbody>
     {% for item in items %}
       {% include "_review_row.html" %}
+    {% else %}
+      <tr class="empty-row"><td colspan="4">Nothing flagged right now — the queue is clear.</td></tr>
     {% endfor %}
   </tbody>
 </table>

@@ -1,37 +1,40 @@
 {% extends "base.html" %}
 {% block content %}
 {% if item %}
-<h2>Track Detail &mdash; {{ item[1] }}</h2>
-<table>
+<p><a href="/review">&larr; Back to queue</a></p>
+<h2>{{ item.filename }}</h2>
+<table class="detail-table">
   <tbody>
-    <tr><th>Path</th><td>{{ item[1] }}</td></tr>
-    <tr><th>Reason</th><td>{{ item[2] }}</td></tr>
-    <tr><th>Status</th><td>{{ item[3] }}</td></tr>
+    <tr><td>Path</td><td class="path">{{ item.path }}</td></tr>
+    <tr><td>Issue</td><td><span class="badge {{ item.category }}">{{ item.category }}</span> {{ item.reason }}</td></tr>
+    <tr><td>Status</td><td>{% if item.status == 'searching' %}<span class="badge status-searching">searching</span>{% else %}{{ item.status }}{% endif %}</td></tr>
   </tbody>
 </table>
-<form hx-post="/review/{{ item[0] }}/relabel" hx-target="body">
-  <input name="artist" placeholder="artist" value="{{ item[4] or '' }}">
-  <input name="album" placeholder="album" value="{{ item[5] or '' }}">
-  <input name="title" placeholder="title">
-  <button type="submit">Save &amp; approve</button>
+
+<h3>Fix metadata</h3>
+<form hx-post="/review/{{ item.id }}/relabel" hx-target="body">
+  <input type="text" name="artist" placeholder="artist" value="{{ item.artist or '' }}">
+  <input type="text" name="album" placeholder="album" value="{{ item.album or '' }}">
+  <input type="text" name="title" placeholder="title">
+  <button type="submit" class="approve">Save &amp; approve</button>
 </form>
 
 <h3>Search usenet for a replacement</h3>
-<p>Looks for a clean copy of this release and queues it in SABnzbd. This item
+<p class="hint">Looks for a clean copy of this release and queues it in SABnzbd. This item
 stays in the queue as "searching" until the download completes and the
 background poller supersedes the bad file automatically.</p>
-<form hx-post="/review/{{ item[0] }}/search-usenet" hx-target="#search-usenet-result">
-  <input name="artist" placeholder="artist" value="{{ item[4] or '' }}" required>
-  <input name="album" placeholder="album" value="{{ item[5] or '' }}" required>
-  <button type="submit">Search usenet &amp; queue download</button>
+<form hx-post="/review/{{ item.id }}/search-usenet" hx-target="#search-usenet-result">
+  <input type="text" name="artist" placeholder="artist" value="{{ item.artist or '' }}" required>
+  <input type="text" name="album" placeholder="album" value="{{ item.album or '' }}" required>
+  <button type="submit" class="primary">Search usenet &amp; queue download</button>
 </form>
 <div id="search-usenet-result"></div>
 
-<button hx-post="/review/{{ item[0] }}/art-candidates" hx-target="#art-candidates">Fetch candidates</button>
+<h3>Album art</h3>
+<button hx-post="/review/{{ item.id }}/art-candidates" hx-target="#art-candidates">Fetch candidates</button>
 <div id="art-candidates"></div>
 {% else %}
-<h2>Track Detail</h2>
-<p>Item not found.</p>
-{% endif %}
 <p><a href="/review">&larr; Back to queue</a></p>
+<h2>Track not found</h2>
+{% endif %}
 {% endblock %}

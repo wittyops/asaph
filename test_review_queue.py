@@ -284,7 +284,11 @@ def test_search_usenet_no_results_does_not_set_searching(mock_search, mock_grab,
         f"/review/{row_id}/search-usenet",
         data={"artist": "Bizzle", "album": "Nonstop"},
     )
-    assert resp.status_code == 404
+    # 200, not 404: HTMX only swaps the response into hx-target on a
+    # 2xx/3xx status, so the "no release found" message must come back as
+    # a normal success response or the reviewer sees nothing at all.
+    assert resp.status_code == 200
+    assert b"No usenet release found" in resp.data
     mock_grab.assert_not_called()
     import sqlite3
     status = sqlite3.connect(str(db_path)).execute(

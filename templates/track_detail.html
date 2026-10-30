@@ -10,11 +10,23 @@
   </tbody>
 </table>
 <form hx-post="/review/{{ item[0] }}/relabel" hx-target="body">
-  <input name="artist" placeholder="artist">
-  <input name="album" placeholder="album">
+  <input name="artist" placeholder="artist" value="{{ item[4] or '' }}">
+  <input name="album" placeholder="album" value="{{ item[5] or '' }}">
   <input name="title" placeholder="title">
   <button type="submit">Save &amp; approve</button>
 </form>
+
+<h3>Search usenet for a replacement</h3>
+<p>Looks for a clean copy of this release and queues it in SABnzbd. This item
+stays in the queue as "searching" until the download completes and the
+background poller supersedes the bad file automatically.</p>
+<form hx-post="/review/{{ item[0] }}/search-usenet" hx-target="#search-usenet-result">
+  <input name="artist" placeholder="artist" value="{{ item[4] or '' }}" required>
+  <input name="album" placeholder="album" value="{{ item[5] or '' }}" required>
+  <button type="submit">Search usenet &amp; queue download</button>
+</form>
+<div id="search-usenet-result"></div>
+
 <button hx-post="/review/{{ item[0] }}/art-candidates" hx-target="#art-candidates">Fetch candidates</button>
 <div id="art-candidates"></div>
 {% else %}

@@ -115,7 +115,8 @@ def delete(item_id: int):
 def detail(item_id: int):
     conn = _db()
     row = conn.execute(
-        "SELECT id, path, reason, status FROM review_items WHERE id=?", (item_id,)
+        "SELECT id, path, reason, status, artist, album FROM review_items WHERE id=?",
+        (item_id,),
     ).fetchone()
     conn.close()
     return render_template("track_detail.html", item=row)
@@ -135,8 +136,10 @@ def search_usenet(item_id: int):
     if release is None:
         # No results -- a normal, expected outcome, not an error. Don't
         # set status='searching' (there's nothing to poll for), and don't
-        # guess at a release.
-        return "no usenet release found", 404
+        # guess at a release. 200, not 404: HTMX only swaps the response
+        # into hx-target on a 2xx/3xx, so a 404 here would render nothing
+        # and leave the reviewer unsure whether the click even registered.
+        return "<p>No usenet release found for that artist/album.</p>", 200
 
     nzo_id = grab_release(
         release,
@@ -151,7 +154,7 @@ def search_usenet(item_id: int):
     )
     conn.commit()
     conn.close()
-    return "", 200
+    return f"<p>Queued for download (SABnzbd job {nzo_id}). This item will move to 'searching' and resolve automatically once it completes.</p>", 200
 
 
 @review_bp.route("/review/<int:item_id>/art-candidates", methods=["POST"])

@@ -15,7 +15,7 @@ import time
 import logging
 from pathlib import Path
 from datetime import datetime, timedelta, timezone
-from flask import Flask, jsonify
+from flask import Flask, jsonify, redirect
 from apscheduler.schedulers.background import BackgroundScheduler
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
@@ -560,6 +560,10 @@ app.config["SABNZBD_BASE"] = os.environ.get("SABNZBD_BASE", "http://wn-sabnzbd-0
 app.config["SABNZBD_API_KEY"] = os.environ.get("SABNZBD_API_KEY", "")  # nosemgrep
 app.config["SABNZBD_CATEGORY"] = os.environ.get("SABNZBD_CATEGORY", "asaph-staging")
 app.register_blueprint(review_bp)
+
+@app.route("/")
+def api_index():
+    return redirect("/review")
 
 @app.route("/health")
 def api_health():

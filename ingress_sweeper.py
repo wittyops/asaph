@@ -13,10 +13,23 @@ metadata from any network source, does not run MusicBrainz matching.
 
 Usage:
     python3 ingress-sweeper.py [--live] [--ingress PATH] [--library PATH]
+        [--review-db PATH]
         --live          Actually move files and notify. Default is dry-run:
                          report only, nothing written, nothing moved.
         --ingress PATH  Default /ingress (container mount)
         --library PATH  Default /library (container mount)
+        --review-db PATH
+                         Default /state/review.db (matches the curator-state
+                         named volume mount used by curator.py/health_scan.py).
+                         Only written to when --live is also set: each item
+                         that ends up quarantined/quarantined-corrupt/error
+                         (anything NOT moved or skipped-dupe) gets a row in
+                         the same review_items table health_scan.py and the
+                         review UI already use, via health_scan.init_review_db
+                         / health_scan._flag — idempotent, never duplicates
+                         or reopens an already-resolved row. In dry-run mode
+                         (no --live), nothing is written to this DB at all —
+                         dry-run means "report only", full stop.
 
 Exit code is always 0 on a clean run (even with quarantined items) — a
 quarantine is expected, routine output, not a script failure. Non-zero only
@@ -29,6 +42,7 @@ import argparse
 import os
 import re
 import shutil
+import sqlite3
 import sys
 import unicodedata
 from dataclasses import dataclass, field
@@ -43,6 +57,7 @@ except ImportError:
     sys.exit(1)
 
 from lib.validator import decode_check, signal_heuristic_check
+from health_scan import init_review_db, _flag
 
 AUDIO_EXTS = {".flac", ".opus", ".m4a", ".mp3", ".ogg", ".oga", ".wav"}
 # Non-audio files the sweeper deliberately leaves alone — never quarantined,
@@ -233,9 +248,18 @@ def walk_ingress(ingress_root: Path):
                 yield p
 
 
-def sweep(ingress_root: Path, library_root: Path, live: bool) -> Report:
+def sweep(ingress_root: Path, library_root: Path, live: bool,
+          review_db: Path | None = None) -> Report:
     report = Report()
     audio_files = list(walk_ingress(ingress_root))
+
+    # Only touch the review DB in --live mode -- dry-run means "report only,
+    # nothing written" and that contract covers this DB too, not just the
+    # ingress/library filesystem moves.
+    conn = None
+    if live and review_db is not None:
+        init_review_db(review_db)
+        conn = sqlite3.connect(str(review_db), timeout=30)
 
     for path in audio_files:
         # Decode/signal checks run before read_tags(): a corrupt/truncated
@@ -247,6 +271,8 @@ def sweep(ingress_root: Path, library_root: Path, live: bool) -> Report:
         decode_err = decode_check(path)
         if decode_err:
             report.add(Item(path, "quarantined-corrupt", decode_err))
+            if conn is not None:
+                _flag(conn, path, decode_err)
             continue
 
         # signal_heuristic_check is documented (lib/validator.py) as a
@@ -267,16 +293,25 @@ def sweep(ingress_root: Path, library_root: Path, live: bool) -> Report:
         try:
             tags = read_tags(path)
         except Exception as e:
-            report.add(Item(path, "error", f"unreadable tags: {e}"))
+            reason = f"unreadable tags: {e}"
+            report.add(Item(path, "error", reason))
+            if conn is not None:
+                _flag(conn, path, reason)
             continue
 
         if not tags or not tags.get("title") or not (tags.get("albumartist") or tags.get("artist")):
-            report.add(Item(path, "quarantined", "missing artist/title tags"))
+            reason = "missing artist/title tags"
+            report.add(Item(path, "quarantined", reason))
+            if conn is not None:
+                _flag(conn, path, reason)
             continue
 
         has_art = tags.get("has_art") or find_sibling_art(path) is not None
         if not has_art:
-            report.add(Item(path, "quarantined", "no embedded art, no sibling cover.jpg/folder.jpg"))
+            reason = "no embedded art, no sibling cover.jpg/folder.jpg"
+            report.add(Item(path, "quarantined", reason))
+            if conn is not None:
+                _flag(conn, path, reason)
             continue
 
         dest = canonical_dest(library_root, tags, path.suffix.lower())
@@ -310,6 +345,9 @@ def sweep(ingress_root: Path, library_root: Path, live: bool) -> Report:
             if Path(fname).suffix.lower() not in AUDIO_EXTS:
                 report.left_alone_count += 1
 
+    if conn is not None:
+        conn.close()
+
     return report
 
 
@@ -318,10 +356,12 @@ def main():
     ap.add_argument("--live", action="store_true")
     ap.add_argument("--ingress", default="/ingress")
     ap.add_argument("--library", default="/library")
+    ap.add_argument("--review-db", default="/state/review.db")
     args = ap.parse_args()
 
     ingress_root = Path(args.ingress)
     library_root = Path(args.library)
+    review_db = Path(args.review_db)
 
     if not ingress_root.is_dir():
         print(f"FATAL: ingress root {ingress_root} not found", file=sys.stderr)
@@ -330,7 +370,7 @@ def main():
         print(f"FATAL: library root {library_root} not found", file=sys.stderr)
         sys.exit(1)
 
-    report = sweep(ingress_root, library_root, live=args.live)
+    report = sweep(ingress_root, library_root, live=args.live, review_db=review_db)
 
     mode = "LIVE" if args.live else "DRY-RUN"
     print(f"=== ingress-sweeper {mode} === {report.summary()}")

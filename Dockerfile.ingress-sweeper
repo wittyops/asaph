@@ -23,6 +23,7 @@ RUN pip install --no-cache-dir mutagen==1.47.0 requests==2.32.3
 
 WORKDIR /app
 COPY ingress_sweeper.py /app/ingress_sweeper.py
+COPY health_scan.py /app/health_scan.py
 COPY lib/ /app/lib/
 
 ENTRYPOINT ["python3", "/app/ingress_sweeper.py"]

@@ -1,3 +1,4 @@
+import sqlite3
 import subprocess
 from pathlib import Path
 from unittest.mock import patch
@@ -74,3 +75,46 @@ def test_clipping_suspect_with_clean_decode_moves_not_quarantines(tmp_path):
     assert report.moved[0].status == "moved"
     assert "clipping" in report.moved[0].reason.lower()
     assert report.moved[0].dest.exists()
+
+
+def test_live_mode_flags_quarantined_item_in_review_db(tmp_path):
+    """A quarantined item (anything NOT moved/skipped-dupe) must produce a
+    review_items row with the right reason, via the exact same
+    health_scan.init_review_db/_flag mechanism health_scan.py and the review
+    UI already use -- not a separate, parallel DB-writing path."""
+    ingress = tmp_path / "ingress"
+    library = tmp_path / "library"
+    ingress.mkdir()
+    library.mkdir()
+    bad = _make_truncated_file(ingress)
+    review_db = tmp_path / "state" / "review.db"
+
+    report = sweep(ingress, library, live=True, review_db=review_db)
+
+    assert len(report.quarantined) == 1
+    assert review_db.exists()
+    conn = sqlite3.connect(str(review_db))
+    row = conn.execute(
+        "SELECT path, reason, status FROM review_items WHERE path = ?",
+        (str(bad),),
+    ).fetchone()
+    conn.close()
+    assert row is not None
+    assert row[2] == "pending"
+
+
+def test_dry_run_does_not_write_review_db(tmp_path):
+    """Dry-run means 'report only, nothing written' -- that contract covers
+    the review DB too, not just the ingress/library filesystem moves. No DB
+    file should even be created."""
+    ingress = tmp_path / "ingress"
+    library = tmp_path / "library"
+    ingress.mkdir()
+    library.mkdir()
+    _make_truncated_file(ingress)
+    review_db = tmp_path / "state" / "review.db"
+
+    report = sweep(ingress, library, live=False, review_db=review_db)
+
+    assert len(report.quarantined) == 1
+    assert not review_db.exists()

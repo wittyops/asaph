@@ -134,6 +134,24 @@ def poll_searching_items(
             _mark_incomplete(conn, item_id, now, summary)
             continue
 
+        # Resolve expected_count BEFORE touching the SABnzbd-side folder at
+        # all. rename_into_staging_layout() empties/removes that source
+        # folder -- if we moved it first and THEN found the track-count
+        # lookup ambiguous/failing, the next poll cycle would recompute the
+        # same remapped path from SABnzbd's history and call
+        # rename_into_staging_layout() on a directory that no longer
+        # exists (FileNotFoundError), permanently stranding the row even
+        # though its files are actually sitting safely in staging already.
+        # Leaving the source untouched this cycle keeps retry safe.
+        try:
+            expected_count = musicbrainz_track_count(artist, album)
+        except Exception:
+            summary["errors"] += 1
+            continue
+        if expected_count is None:
+            summary["still_searching"] += 1
+            continue
+
         storage = history_slot.get("storage")
         try:
             remapped = remap_sabnzbd_path(storage, sabnzbd_staging_prefix, staging_root)
@@ -148,15 +166,6 @@ def poll_searching_items(
             staging_dir = rename_into_staging_layout(remapped, artist, album, staging_root)
         except Exception:
             summary["errors"] += 1
-            continue
-
-        try:
-            expected_count = musicbrainz_track_count(artist, album)
-        except Exception:
-            summary["errors"] += 1
-            continue
-        if expected_count is None:
-            summary["still_searching"] += 1
             continue
 
         if check_completeness(staging_dir, expected_count):

@@ -13,7 +13,7 @@ from usenet_poll import poll_searching_items
 SABNZBD_PREFIX = Path("/data/usenet/complete/asaph-staging")
 
 
-def _seed_searching_row(db_path, artist="Bizzle", album="Nonstop", path=None, nzo_id="nzo-1"):
+def _seed_searching_row(db_path, artist="Bizzle", album="Nonstop", path=None, nzo_id: str | None = "nzo-1"):
     if path is None:
         path = "/library/Bizzle/Non-Album/Warriors.flac"
     conn = sqlite3.connect(str(db_path))
@@ -218,6 +218,27 @@ def test_musicbrainz_lookup_api_error_counts_as_error_not_still_searching(mock_q
         "SELECT status FROM review_items").fetchone()[0]
     assert status == "searching"  # unchanged, not corrupted by the error
 
+    # Regression (review finding, commit 5bcafea): the SABnzbd-side source
+    # folder must be left completely untouched when the track-count lookup
+    # fails -- rename_into_staging_layout() must not run until AFTER a real
+    # expected_count is in hand. Previously the rename ran first, emptying
+    # real_sab_dir; a second poll cycle would then crash with
+    # FileNotFoundError trying to re-read a folder that no longer existed,
+    # permanently stranding the row even though its files were already safe.
+    assert real_sab_dir.exists()
+    assert (real_sab_dir / "01.flac").exists()
+
+    # A second cycle, once MusicBrainz is reachable again, must resolve
+    # cleanly from the same untouched source -- proving the row isn't
+    # permanently stuck.
+    mock_count.side_effect = None
+    mock_count.return_value = 1
+    result2 = _poll(db_path, tmp_path)
+    assert result2 == {"resolved": 1, "still_searching": 0, "errors": 0}
+    status2 = sqlite3.connect(str(db_path)).execute(
+        "SELECT status FROM review_items").fetchone()[0]
+    assert status2 == "resolved"
+
 
 @patch("usenet_poll.musicbrainz_track_count")
 @patch("usenet_poll._sabnzbd_history")
@@ -295,7 +316,7 @@ def test_one_row_update_failure_does_not_lose_other_rows_committed_same_cycle(mo
     mock_count.return_value = 1
 
     sab_dirs = {}
-    for suffix, artist, album, old_dir in (("a", "ArtistA", "AlbumA", old_dir_a), ("b", "ArtistB", "AlbumB", old_dir_b)):
+    for suffix, old_dir in (("a", old_dir_a), ("b", old_dir_b)):
         sab_dir_name = f"Some.Release.Folder.{suffix}"
         real_sab_dir = tmp_path / "staging" / sab_dir_name
         real_sab_dir.mkdir(parents=True)

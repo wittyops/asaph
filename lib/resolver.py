@@ -106,7 +106,11 @@ def _musicbrainz_release_search_call(artist: str, album: str) -> dict:
     result's "media" array already carries a track-count per medium
     (no separate release-detail fetch needed), so this one call is
     enough to get an album's total track count on demand."""
-    query = f'artist:"{artist}" AND release:"{album}"'
+    # Escape literal quotes Lucene-style so an artist/album containing a
+    # `"` can't malform the query.
+    artist_escaped = artist.replace('"', '\\"')
+    album_escaped = album.replace('"', '\\"')
+    query = f'artist:"{artist_escaped}" AND release:"{album_escaped}"'
     r = requests.get(
         "https://musicbrainz.org/ws/2/release/",
         params={"query": query, "fmt": "json"},
@@ -141,7 +145,7 @@ def musicbrainz_track_count(artist: str, album: str) -> int | None:
             continue
         credits = release.get("artist-credit", [])
         names = {(c.get("name") or "").strip().lower() for c in credits if isinstance(c, dict)}
-        if artist_l in names or any(artist_l == n for n in names):
+        if artist_l in names:
             matches.append(release)
 
     if len(matches) != 1:

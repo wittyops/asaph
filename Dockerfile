@@ -8,8 +8,7 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY curator.py health_scan.py .
-COPY lib ./lib
+COPY . .
 
 EXPOSE 9000
 CMD ["python", "curator.py"]

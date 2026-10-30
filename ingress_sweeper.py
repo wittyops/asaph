@@ -249,12 +249,20 @@ def sweep(ingress_root: Path, library_root: Path, live: bool) -> Report:
             report.add(Item(path, "quarantined-corrupt", decode_err))
             continue
 
+        # signal_heuristic_check is documented (lib/validator.py) as a
+        # heuristic -- "never a pass/fail verdict on its own" -- and the
+        # spec routes its suspects to human review, not a hard ingest
+        # block. decode_check above is the only real pass/fail gate here:
+        # a file that fails to decode is genuinely broken. A clipping
+        # suspect alone (which the -0.1 dBFS threshold will flag on a
+        # large share of normal modern-mastered/lossy-decoded audio) must
+        # not block the move -- it's recorded for visibility, but the file
+        # still proceeds exactly like a clean one.
         suspects = signal_heuristic_check(path)
+        suspect_note = ""
         if suspects:
-            reason = f"{len(suspects)} suspect range(s): " + \
+            suspect_note = f"{len(suspects)} suspect range(s): " + \
                 "; ".join(f"{s['kind']} at {s['start_s']:.1f}-{s['end_s']:.1f}s" for s in suspects)
-            report.add(Item(path, "quarantined-suspect", reason))
-            continue
 
         try:
             tags = read_tags(path)
@@ -277,7 +285,10 @@ def sweep(ingress_root: Path, library_root: Path, live: bool) -> Report:
             report.add(Item(path, "skipped-dupe", f"matches existing {dupe}", dest=dupe))
             continue
 
-        item = Item(path, "moved", "validated, moved to canonical path", dest=dest)
+        reason = "validated, moved to canonical path"
+        if suspect_note:
+            reason += f" [signal heuristic note, not a block: {suspect_note}]"
+        item = Item(path, "moved", reason, dest=dest)
         if live:
             dest.parent.mkdir(parents=True, exist_ok=True)
             move_file(path, dest)

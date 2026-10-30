@@ -55,3 +55,39 @@ def test_scan_library_does_not_flag_clean_files(tmp_path):
     )
     flagged_count = scan_library([library], db_path)
     assert flagged_count == 0
+
+
+def test_scan_library_does_not_reverse_a_resolved_human_approval(tmp_path):
+    """A human already reviewed and resolved this exact path (e.g. approved
+    a false-positive clipping flag). The next weekly scan, finding the same
+    file still failing the same heuristic, must leave the row 'resolved' --
+    not reset it back to 'pending' and erase the approval."""
+    db_path = tmp_path / "curator.db"
+    init_review_db(db_path)
+    library = tmp_path / "library"
+    library.mkdir()
+    bad_file = _make_truncated_flac(library)
+
+    import sqlite3 as _sqlite3
+    from datetime import datetime, timezone
+    conn = _sqlite3.connect(str(db_path))
+    conn.execute(
+        "INSERT INTO review_items (path, reason, status, flagged_at, resolved_at) "
+        "VALUES (?, ?, 'resolved', ?, ?)",
+        (str(bad_file), "ffmpeg decode warning: pre-existing, approved by human",
+         datetime.now(timezone.utc).isoformat(), datetime.now(timezone.utc).isoformat()),
+    )
+    conn.commit()
+    conn.close()
+
+    flagged_count = scan_library([library], db_path)
+
+    assert flagged_count == 0  # must not count an already-resolved row as newly flagged
+    conn = sqlite3.connect(str(db_path))
+    row = conn.execute(
+        "SELECT status, reason FROM review_items WHERE path = ?", (str(bad_file),)
+    ).fetchone()
+    conn.close()
+    assert row is not None
+    assert row[0] == "resolved"
+    assert "approved by human" in row[1]

@@ -88,7 +88,10 @@ def poll_searching_items(
     library_root: Path,
     archive_root: Path,
 ) -> dict:
-    conn = sqlite3.connect(str(db_path))
+    # timeout=30: a busy-wait tolerance so a brief write from the review UI
+    # or a concurrent poll/scan doesn't immediately raise "database is
+    # locked" -- see health_scan.py's matching change (Fix 4).
+    conn = sqlite3.connect(str(db_path), timeout=30)
     rows = conn.execute(
         "SELECT id, path, artist, album FROM review_items WHERE status='searching'"
     ).fetchall()
@@ -123,7 +126,14 @@ def poll_searching_items(
             summary["still_searching"] += 1
             continue
 
-        old_dir = library_root / artist / album
+        # old_dir comes from the row's own real file path, NOT a fresh
+        # artist/album reconstruction -- the library's real directory names
+        # go through ingress_sweeper.py's sanitize() (colon substitution,
+        # unsafe-char stripping, etc.), so artist/album strings from the
+        # review form will not reliably match the actual on-disk directory.
+        # The row's `path` column already points at the real file under the
+        # real directory, so its parent is the one safe source of truth.
+        old_dir = Path(path).parent
         now = datetime.now(timezone.utc).isoformat()
 
         if check_completeness(staging_dir, expected_count):
@@ -132,22 +142,42 @@ def poll_searching_items(
             else:
                 old_dir.parent.mkdir(parents=True, exist_ok=True)
                 staging_dir.rename(old_dir)
-            conn.execute(
-                "UPDATE review_items SET status='resolved', resolved_at=?, "
-                "reason=reason || ' [usenet grab complete, superseded old library files]' "
-                "WHERE id=?",
-                (now, item_id),
-            )
+            try:
+                conn.execute(
+                    "UPDATE review_items SET status='resolved', resolved_at=?, "
+                    "reason=reason || ' [usenet grab complete, superseded old library files]' "
+                    "WHERE id=?",
+                    (now, item_id),
+                )
+                conn.commit()
+            except Exception as e:
+                # Files have already been moved by check_completeness()'s
+                # True branch above -- that's done and can't be silently
+                # undone. If the row update itself fails (e.g. a lock that
+                # outlasts the busy timeout), surface it as an error rather
+                # than losing track of the fact that this row's on-disk
+                # state no longer matches its DB status, and don't let it
+                # abort rows already committed earlier in this same cycle.
+                summary["errors"] += 1
+                print(f"usenet_poll: row {item_id} UPDATE failed after files were "
+                      f"already moved (dir now in sync, DB status stale): {e}")
+                continue
             summary["resolved"] += 1
         else:
-            conn.execute(
-                "UPDATE review_items SET status='resolved', resolved_at=?, "
-                "reason=reason || ' [usenet grab incomplete/partial -- left existing library file in place]' "
-                "WHERE id=?",
-                (now, item_id),
-            )
+            try:
+                conn.execute(
+                    "UPDATE review_items SET status='resolved', resolved_at=?, "
+                    "reason=reason || ' [usenet grab incomplete/partial -- left existing library file in place]' "
+                    "WHERE id=?",
+                    (now, item_id),
+                )
+                conn.commit()
+            except Exception as e:
+                summary["errors"] += 1
+                print(f"usenet_poll: row {item_id} UPDATE failed (no files moved "
+                      f"for this row, safe to retry next cycle): {e}")
+                continue
             summary["resolved"] += 1
 
-    conn.commit()
     conn.close()
     return summary

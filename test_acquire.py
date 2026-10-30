@@ -108,7 +108,8 @@ def test_acquire_grab_inserts_searching_row_with_sanitized_path(mock_grab, tmp_p
         data={"artist": "Bizzle", "album": "Non:stop", "download_url": "http://nzb/1"},
     )
     assert resp.status_code == 200
-    assert b"Queued for download" in resp.data
+    assert b"badge validated" in resp.data
+    assert b"nzo-999" in resp.data
     conn = sqlite3.connect(str(db_path))
     row = conn.execute(
         "SELECT path, status, artist, album, nzo_id FROM review_items"
@@ -144,7 +145,7 @@ def test_acquire_grab_duplicate_in_progress_returns_friendly_message(mock_grab, 
         "/acquire/grab",
         data={"artist": "Bizzle", "album": "Nonstop", "download_url": "http://nzb/1"},
     )
-    assert b"Queued for download" in first.data
+    assert b"badge validated" in first.data
 
     mock_grab.return_value = "nzo-2"
     second = client.post(

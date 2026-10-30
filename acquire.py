@@ -67,7 +67,7 @@ def acquire_grab():
     album = request.form.get("album", "").strip()
     download_url = request.form.get("download_url", "").strip()
     if not artist or not album or not download_url:
-        return '<p class="result-msg">Missing artist, album, or download link.</p>', 200
+        return '<span class="badge corrupt" title="Missing artist, album, or download link">Error</span>', 200
 
     nzo_id = grab_release(
         {"downloadUrl": download_url},
@@ -96,12 +96,12 @@ def acquire_grab():
     except sqlite3.IntegrityError:
         conn.close()
         return (
-            '<p class="result-msg">An acquisition for this exact artist/album is already '
-            'in progress -- check the review queue for its status.</p>'
+            '<span class="badge metadata" title="An acquisition for this exact artist/album '
+            'is already in progress">Already queued</span>'
         ), 200
     conn.close()
 
     return (
-        f'<p class="result-msg">Queued for download (SABnzbd job {escape(nzo_id)}). '
-        'Track it from the <a href="/review">review queue</a> once it starts resolving.</p>'
+        f'<a href="/review" class="badge validated" '
+        f'title="SABnzbd job {escape(nzo_id)} -- click to track it in the review queue">Queued</a>'
     ), 200

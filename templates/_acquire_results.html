@@ -33,11 +33,12 @@ even if your search only used one of the two fields.</p>
         <input type="text" id="artist-{{ loop.index }}" name="artist" placeholder="artist" value="{{ artist }}" style="width:90px">
         <input type="text" id="album-{{ loop.index }}" name="album" placeholder="album" value="{{ album }}" style="width:90px">
       </td>
-      <td>
+      <td id="grab-cell-{{ loop.index }}">
         <button
           class="approve"
           hx-post="/acquire/grab"
-          hx-target="#acquire-grab-result"
+          hx-target="#grab-cell-{{ loop.index }}"
+          hx-swap="innerHTML"
           hx-include="#artist-{{ loop.index }}, #album-{{ loop.index }}"
           hx-vals='{"download_url": {{ r.downloadUrl|tojson }}}'
         >Grab</button>
@@ -47,4 +48,3 @@ even if your search only used one of the two fields.</p>
   </tbody>
 </table>
 {% endif %}
-<div id="acquire-grab-result"></div>

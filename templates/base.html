@@ -88,6 +88,10 @@
     button.delete:hover { background: rgba(224,92,92,0.12); }
     button.primary { border-color: rgba(91,140,255,0.5); color: var(--blue); }
     button.primary:hover { background: rgba(91,140,255,0.12); }
+    /* htmx adds this class to an element while its request is in flight --
+       gives immediate click feedback instead of the button looking inert
+       until the response (possibly seconds later) lands. */
+    .htmx-request { opacity: 0.5; pointer-events: none; }
 
     input[type=text] {
       background: #10131a; color: var(--text); border: 1px solid var(--border);

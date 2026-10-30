@@ -1,5 +1,12 @@
 from unittest.mock import patch, MagicMock
-from resolver import resolve_metadata, acoustid_lookup, fetch_cover_art, musicbrainz_track_count
+import requests
+from resolver import (
+    resolve_metadata,
+    acoustid_lookup,
+    fetch_cover_art,
+    musicbrainz_track_count,
+    _musicbrainz_release_search_call,
+)
 
 def test_resolve_metadata_trusts_embedded_tags_when_complete():
     tags = {"artist": "Bizzle", "album": "Nonstop", "title": "Warriors"}
@@ -74,3 +81,37 @@ def test_musicbrainz_track_count_propagates_real_api_errors(mock_call):
         assert False, "expected the API error to propagate"
     except TimeoutError:
         pass
+
+@patch("resolver.time.sleep")
+@patch("resolver.requests.get")
+def test_release_search_retries_on_503_then_succeeds(mock_get, mock_sleep):
+    rate_limited = MagicMock(status_code=503, headers={})
+    ok = MagicMock(status_code=200, headers={})
+    ok.json.return_value = {"releases": []}
+    mock_get.side_effect = [rate_limited, ok]
+    result = _musicbrainz_release_search_call("Bizzle", "Nonstop")
+    assert result == {"releases": []}
+    assert mock_get.call_count == 2
+    mock_sleep.assert_called_once()
+
+@patch("resolver.time.sleep")
+@patch("resolver.requests.get")
+def test_release_search_honors_retry_after_header(mock_get, mock_sleep):
+    rate_limited = MagicMock(status_code=429, headers={"Retry-After": "5"})
+    ok = MagicMock(status_code=200, headers={})
+    ok.json.return_value = {"releases": []}
+    mock_get.side_effect = [rate_limited, ok]
+    _musicbrainz_release_search_call("Bizzle", "Nonstop")
+    mock_sleep.assert_called_once_with(5.0)
+
+@patch("resolver.time.sleep")
+@patch("resolver.requests.get")
+def test_release_search_raises_after_exhausting_retries(mock_get, mock_sleep):
+    rate_limited = MagicMock(status_code=503, headers={})
+    mock_get.return_value = rate_limited
+    try:
+        _musicbrainz_release_search_call("Bizzle", "Nonstop")
+        assert False, "expected the persistent rate-limit to raise"
+    except requests.exceptions.HTTPError:
+        pass
+    assert mock_get.call_count == 3

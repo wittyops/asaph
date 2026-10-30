@@ -7,6 +7,7 @@ Asaph.
 from __future__ import annotations
 
 import os
+import time
 from dataclasses import dataclass
 
 import requests
@@ -101,24 +102,55 @@ def fetch_cover_art(mb_release_id: str | None) -> bytes | None:
 MUSICBRAINZ_USER_AGENT = "Asaph/2.0.0 (wittycomp-lab curator)"
 
 
+MUSICBRAINZ_MAX_RETRIES = 3
+MUSICBRAINZ_RETRY_BACKOFF_S = 2.0
+
+
 def _musicbrainz_release_search_call(artist: str, album: str) -> dict:
     """Direct MusicBrainz release search (ws/2/release, fmt=json). Each
     result's "media" array already carries a track-count per medium
     (no separate release-detail fetch needed), so this one call is
-    enough to get an album's total track count on demand."""
-    # Escape literal quotes Lucene-style so an artist/album containing a
-    # `"` can't malform the query.
+    enough to get an album's total track count on demand.
+
+    MusicBrainz enforces a ~1 req/sec rate limit and returns 503 (or,
+    less often, 429) when exceeded -- confirmed live 2026-10-30: two
+    calls a few seconds apart from separate processes was enough to
+    trip it. usenet_poll.py's 5-minute cycle calls this once per
+    'searching' row in a tight loop with no pacing between rows, so
+    with 2+ rows pending this hit on every real cycle, not just under
+    load. Retries a bounded number of times on 429/503, honoring the
+    server's Retry-After header when present (falling back to a fixed
+    backoff otherwise), before giving up and letting the error
+    propagate -- callers already treat a genuine API failure here as
+    a real error, not the ambiguous/not-found case, so a persistent
+    outage still surfaces correctly after retries exhaust."""
     artist_escaped = artist.replace('"', '\\"')
     album_escaped = album.replace('"', '\\"')
     query = f'artist:"{artist_escaped}" AND release:"{album_escaped}"'
-    r = requests.get(
-        "https://musicbrainz.org/ws/2/release/",
-        params={"query": query, "fmt": "json"},
-        headers={"User-Agent": MUSICBRAINZ_USER_AGENT},
-        timeout=HTTP_TIMEOUT_S,
-    )
-    r.raise_for_status()
-    return r.json()
+
+    backoff_s = MUSICBRAINZ_RETRY_BACKOFF_S
+    last_exc = requests.exceptions.HTTPError("MusicBrainz rate-limited (no attempts made)")
+    for attempt in range(MUSICBRAINZ_MAX_RETRIES):
+        if attempt > 0:
+            time.sleep(backoff_s)
+        r = requests.get(
+            "https://musicbrainz.org/ws/2/release/",
+            params={"query": query, "fmt": "json"},
+            headers={"User-Agent": MUSICBRAINZ_USER_AGENT},
+            timeout=HTTP_TIMEOUT_S,
+        )
+        if r.status_code not in (429, 503):
+            r.raise_for_status()
+            return r.json()
+        retry_after = r.headers.get("Retry-After")
+        try:
+            backoff_s = float(retry_after) if retry_after else MUSICBRAINZ_RETRY_BACKOFF_S
+        except ValueError:
+            backoff_s = MUSICBRAINZ_RETRY_BACKOFF_S
+        last_exc = requests.exceptions.HTTPError(
+            f"{r.status_code} rate-limited by MusicBrainz", response=r
+        )
+    raise last_exc
 
 
 def musicbrainz_track_count(artist: str, album: str) -> int | None:

@@ -14,7 +14,8 @@ def _seed_db(db_path, tmp_path):
         CREATE TABLE review_items (
             id INTEGER PRIMARY KEY AUTOINCREMENT, path TEXT UNIQUE NOT NULL,
             reason TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'pending',
-            flagged_at TEXT NOT NULL, resolved_at TEXT
+            flagged_at TEXT NOT NULL, resolved_at TEXT,
+            artist TEXT, album TEXT
         )
     """)
     f = tmp_path / "bad.flac"

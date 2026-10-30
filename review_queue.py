@@ -11,6 +11,7 @@ from pathlib import Path
 from flask import Blueprint, current_app, render_template, request
 
 from lib.resolver import fetch_cover_art
+from lib.tagwriter import embed_art, write_tags
 from usenet_flow import grab_release, pick_best_release, search_prowlarr
 
 review_bp = Blueprint("review", __name__, template_folder="templates")
@@ -65,7 +66,23 @@ def relabel(item_id: int):
     artist = request.form.get("artist", "").strip()
     album = request.form.get("album", "").strip()
     title = request.form.get("title", "").strip()
+
     conn = _db()
+    row = conn.execute("SELECT path FROM review_items WHERE id=?", (item_id,)).fetchone()
+    if row is None:
+        conn.close()
+        return "review item not found", 404
+    path = Path(row[0])
+    if not path.exists():
+        conn.close()
+        return "audio file not found on disk", 404
+
+    try:
+        write_tags(path, artist or None, album or None, title or None)
+    except Exception:
+        conn.close()
+        return "failed to write tags to audio file", 500
+
     conn.execute(
         "UPDATE review_items SET status='resolved', resolved_at=?, "
         "reason=reason || ' [relabeled: ' || ? || '/' || ? || '/' || ? || ']' "
@@ -154,10 +171,27 @@ def art_select(item_id: int):
     image_bytes = fetch_cover_art(mb_release_id)
     if image_bytes is None:
         return "no art found for that release", 404
+
     conn = _db()
+    row = conn.execute("SELECT path FROM review_items WHERE id=?", (item_id,)).fetchone()
+    if row is None:
+        conn.close()
+        return "review item not found", 404
+    path = Path(row[0])
+    if not path.exists():
+        conn.close()
+        return "audio file not found on disk", 404
+
+    try:
+        embed_art(path, image_bytes)
+    except Exception:
+        conn.close()
+        return "failed to embed art in audio file", 500
+
     conn.execute(
-        "UPDATE review_items SET reason = reason || ' [art selected: ' || ? || ']' WHERE id=?",
-        (mb_release_id, item_id),
+        "UPDATE review_items SET status='resolved', resolved_at=?, "
+        "reason = reason || ' [art selected: ' || ? || ']' WHERE id=?",
+        (datetime.now(timezone.utc).isoformat(), mb_release_id, item_id),
     )
     conn.commit()
     conn.close()

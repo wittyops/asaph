@@ -5,7 +5,7 @@
   </td>
   <td><span class="badge {{ item.category }}">{{ item.category }}</span> {{ item.reason }}</td>
   <td>
-    {% if item.status == 'searching' %}<span class="badge status-searching">searching</span>{% else %}{{ item.status }}{% endif %}
+    {% if item.status == 'searching' %}<span class="badge status-searching">&#9203; searching</span>{% else %}<span class="badge other">&#9208; awaiting review</span>{% endif %}
   </td>
   <td>
     <button class="approve" hx-post="/review/{{ item.id }}/approve" hx-target="#row-{{ item.id }}" hx-swap="outerHTML">Approve</button>

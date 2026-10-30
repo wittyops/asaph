@@ -8,6 +8,9 @@
     <tr><td>Path</td><td class="path">{{ item.path }}</td></tr>
     <tr><td>Issue</td><td><span class="badge {{ item.category }}">{{ item.category }}</span> {{ item.reason }}</td></tr>
     <tr><td>Status</td><td>{% if item.status == 'searching' %}<span class="badge status-searching">searching</span>{% else %}{{ item.status }}{% endif %}</td></tr>
+    {% if live_state %}
+    <tr><td>Next step</td><td><span class="badge {{ live_state.css }}">{{ live_state.icon }}</span> {{ live_state.label }}</td></tr>
+    {% endif %}
   </tbody>
 </table>
 

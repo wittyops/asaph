@@ -13,7 +13,13 @@ from markupsafe import escape
 
 from lib.resolver import fetch_cover_art
 from lib.tagwriter import embed_art, write_tags
-from usenet_flow import grab_release, pick_best_release, search_prowlarr
+from usenet_flow import (
+    grab_release,
+    pick_best_release,
+    sabnzbd_history,
+    sabnzbd_queue,
+    search_prowlarr,
+)
 
 review_bp = Blueprint("review", __name__, template_folder="templates")
 REVIEW_DB_KEY = "REVIEW_DB_PATH"
@@ -38,6 +44,73 @@ def _categorize(reason: str) -> str:
     return "other"
 
 
+def _live_usenet_state(nzo_id: str | None, sabnzbd_base: str, api_key: str) -> dict:
+    """Best-effort live lookup of an in-flight grab's real state, for the
+    detail page only -- never called from the list view, which would mean
+    one SABnzbd API call per queue row. This is purely informational: the
+    actual resolution logic lives in usenet_poll.py and this never writes
+    anything. On any API failure it returns an 'unknown' state so the page
+    still renders.
+
+    'searching' on review_items hides at least 4 different real states
+    (actively downloading, queued but not yet started, completed and
+    waiting for the next poll cycle, or completed-but-stuck because the
+    MusicBrainz match was ambiguous) -- this gives the reviewer a real
+    answer instead of one static badge for all of them."""
+    if not nzo_id:
+        return {"icon": "?", "css": "other", "label": "No SABnzbd job recorded for this item."}
+
+    try:
+        queue = sabnzbd_queue(sabnzbd_base, api_key)
+    except Exception:
+        return {"icon": "?", "css": "other", "label": "Could not reach SABnzbd to check status."}
+
+    slot = next((s for s in queue if s.get("nzo_id") == nzo_id), None)
+    if slot is not None:
+        pct = slot.get("percentage", "?")
+        sab_status = slot.get("status", "Downloading")
+        return {
+            "icon": "⏳",  # hourglass
+            "css": "usenet",
+            "label": f"{sab_status} — {pct}% complete. Will auto-resolve once finished.",
+        }
+
+    try:
+        history = sabnzbd_history(sabnzbd_base, api_key)
+    except Exception:
+        return {"icon": "?", "css": "other", "label": "Could not reach SABnzbd to check status."}
+
+    slot = next((s for s in history if s.get("nzo_id") == nzo_id), None)
+    if slot is None:
+        return {
+            "icon": "⏳",
+            "css": "usenet",
+            "label": "Queued — waiting for SABnzbd to pick this job up.",
+        }
+
+    if slot.get("status") == "Completed":
+        return {
+            "icon": "✅",  # check mark
+            "css": "validated",
+            "label": (
+                "Download complete — waiting for the next validation cycle to "
+                "verify the track count and promote it. If this stays in "
+                "'searching' for a long time, the MusicBrainz match was likely "
+                "ambiguous and needs a manual relabel + retry."
+            ),
+        }
+
+    return {
+        "icon": "⚠",  # warning
+        "css": "corrupt",
+        "label": (
+            f"SABnzbd reported '{slot.get('status', 'unknown')}'. Will be marked "
+            "resolved automatically on the next poll cycle, keeping the existing "
+            "library file in place."
+        ),
+    }
+
+
 def _row_dict(row: tuple) -> dict:
     item_id, path, reason, status = row[0], row[1], row[2], row[3]
     return {
@@ -49,6 +122,7 @@ def _row_dict(row: tuple) -> dict:
         "category": _categorize(reason),
         "artist": row[4] if len(row) > 4 else None,
         "album": row[5] if len(row) > 5 else None,
+        "nzo_id": row[6] if len(row) > 6 else None,
     }
 
 
@@ -146,12 +220,19 @@ def delete(item_id: int):
 def detail(item_id: int):
     conn = _db()
     row = conn.execute(
-        "SELECT id, path, reason, status, artist, album FROM review_items WHERE id=?",
+        "SELECT id, path, reason, status, artist, album, nzo_id FROM review_items WHERE id=?",
         (item_id,),
     ).fetchone()
     conn.close()
     item = _row_dict(row) if row else None
-    return render_template("track_detail.html", item=item)
+    live_state = None
+    if item and item["status"] == "searching":
+        live_state = _live_usenet_state(
+            item["nzo_id"],
+            current_app.config["SABNZBD_BASE"],
+            current_app.config["SABNZBD_API_KEY"],
+        )
+    return render_template("track_detail.html", item=item, live_state=live_state)
 
 
 @review_bp.route("/review/<int:item_id>/search-usenet", methods=["POST"])

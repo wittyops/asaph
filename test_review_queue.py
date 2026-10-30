@@ -295,3 +295,89 @@ def test_search_usenet_no_results_does_not_set_searching(mock_search, mock_grab,
         "SELECT status FROM review_items WHERE id=?", (row_id,)
     ).fetchone()[0]
     assert status == "pending"
+
+
+def _seed_searching_row(db_path, tmp_path, nzo_id="nzo-123"):
+    """Like _seed_db but the row is already mid-flight: status='searching'
+    with an nzo_id, the state detail()'s live-status lookup needs."""
+    conn = sqlite3.connect(str(db_path))
+    conn.execute("""
+        CREATE TABLE review_items (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, path TEXT UNIQUE NOT NULL,
+            reason TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'pending',
+            flagged_at TEXT NOT NULL, resolved_at TEXT,
+            artist TEXT, album TEXT, nzo_id TEXT
+        )
+    """)
+    f = tmp_path / "bad.flac"
+    f.write_bytes(b"\x00" * 10)
+    conn.execute(
+        "INSERT INTO review_items (path, reason, status, flagged_at, artist, album, nzo_id) "
+        "VALUES (?,?,?,?,?,?,?)",
+        (str(f), "file too small", "searching", datetime.now(timezone.utc).isoformat(),
+         "Bizzle", "Nonstop", nzo_id),
+    )
+    conn.commit()
+    row_id = conn.execute("SELECT id FROM review_items").fetchone()[0]
+    conn.close()
+    return row_id
+
+
+@patch("review_queue.sabnzbd_queue")
+def test_detail_shows_live_downloading_state(mock_queue, tmp_path):
+    mock_queue.return_value = [{"nzo_id": "nzo-123", "status": "Downloading", "percentage": "42"}]
+    db_path = tmp_path / "review.db"
+    row_id = _seed_searching_row(db_path, tmp_path)
+    app = _configure_usenet_app(_make_app(db_path))
+    resp = app.test_client().get(f"/review/{row_id}")
+    assert resp.status_code == 200
+    assert b"42% complete" in resp.data
+
+
+@patch("review_queue.sabnzbd_history")
+@patch("review_queue.sabnzbd_queue")
+def test_detail_shows_queued_state_when_not_in_queue_or_history(mock_queue, mock_history, tmp_path):
+    mock_queue.return_value = []
+    mock_history.return_value = []
+    db_path = tmp_path / "review.db"
+    row_id = _seed_searching_row(db_path, tmp_path)
+    app = _configure_usenet_app(_make_app(db_path))
+    resp = app.test_client().get(f"/review/{row_id}")
+    assert resp.status_code == 200
+    assert b"waiting for SABnzbd to pick this job up" in resp.data
+
+
+@patch("review_queue.sabnzbd_history")
+@patch("review_queue.sabnzbd_queue")
+def test_detail_shows_completed_awaiting_validation_state(mock_queue, mock_history, tmp_path):
+    mock_queue.return_value = []
+    mock_history.return_value = [{"nzo_id": "nzo-123", "status": "Completed"}]
+    db_path = tmp_path / "review.db"
+    row_id = _seed_searching_row(db_path, tmp_path)
+    app = _configure_usenet_app(_make_app(db_path))
+    resp = app.test_client().get(f"/review/{row_id}")
+    assert resp.status_code == 200
+    assert b"waiting for the next validation cycle" in resp.data
+
+
+@patch("review_queue.sabnzbd_history")
+@patch("review_queue.sabnzbd_queue")
+def test_detail_shows_failed_state(mock_queue, mock_history, tmp_path):
+    mock_queue.return_value = []
+    mock_history.return_value = [{"nzo_id": "nzo-123", "status": "Failed"}]
+    db_path = tmp_path / "review.db"
+    row_id = _seed_searching_row(db_path, tmp_path)
+    app = _configure_usenet_app(_make_app(db_path))
+    resp = app.test_client().get(f"/review/{row_id}")
+    assert resp.status_code == 200
+    assert b"SABnzbd reported" in resp.data
+    assert b"Failed" in resp.data
+
+
+def test_detail_hides_live_state_for_non_searching_item(tmp_path):
+    db_path = tmp_path / "review.db"
+    row_id = _seed_db(db_path, tmp_path)
+    app = _configure_usenet_app(_make_app(db_path))
+    resp = app.test_client().get(f"/review/{row_id}")
+    assert resp.status_code == 200
+    assert b"Next step" not in resp.data

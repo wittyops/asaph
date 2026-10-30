@@ -54,7 +54,7 @@ def _poll(db_path, tmp_path, **kwargs):
     )
 
 
-@patch("usenet_poll._sabnzbd_queue")
+@patch("usenet_poll.sabnzbd_queue")
 def test_item_still_in_sabnzbd_queue_stays_searching(mock_queue, tmp_path):
     db_path = tmp_path / "review.db"
     _seed_searching_row(db_path)
@@ -68,8 +68,8 @@ def test_item_still_in_sabnzbd_queue_stays_searching(mock_queue, tmp_path):
     assert status == "searching"
 
 
-@patch("usenet_poll._sabnzbd_history")
-@patch("usenet_poll._sabnzbd_queue")
+@patch("usenet_poll.sabnzbd_history")
+@patch("usenet_poll.sabnzbd_queue")
 def test_item_not_in_queue_or_history_stays_searching(mock_queue, mock_history, tmp_path):
     db_path = tmp_path / "review.db"
     _seed_searching_row(db_path)
@@ -82,8 +82,8 @@ def test_item_not_in_queue_or_history_stays_searching(mock_queue, mock_history, 
 
 
 @patch("usenet_poll.musicbrainz_track_count")
-@patch("usenet_poll._sabnzbd_history")
-@patch("usenet_poll._sabnzbd_queue")
+@patch("usenet_poll.sabnzbd_history")
+@patch("usenet_poll.sabnzbd_queue")
 def test_complete_history_resolves_and_supersedes(mock_queue, mock_history, mock_count, tmp_path):
     db_path = tmp_path / "review.db"
     old_dir = tmp_path / "library" / "Bizzle" / "Nonstop"
@@ -121,8 +121,8 @@ def test_complete_history_resolves_and_supersedes(mock_queue, mock_history, mock
 
 
 @patch("usenet_poll.musicbrainz_track_count")
-@patch("usenet_poll._sabnzbd_history")
-@patch("usenet_poll._sabnzbd_queue")
+@patch("usenet_poll.sabnzbd_history")
+@patch("usenet_poll.sabnzbd_queue")
 def test_incomplete_grab_resolves_without_superseding(mock_queue, mock_history, mock_count, tmp_path):
     db_path = tmp_path / "review.db"
     old_dir = tmp_path / "library" / "Bizzle" / "Nonstop"
@@ -152,8 +152,8 @@ def test_incomplete_grab_resolves_without_superseding(mock_queue, mock_history, 
     assert (tmp_path / "library" / "Bizzle" / "Nonstop" / "01.flac").read_bytes() == b"old-bad-rip"
 
 
-@patch("usenet_poll._sabnzbd_history")
-@patch("usenet_poll._sabnzbd_queue")
+@patch("usenet_poll.sabnzbd_history")
+@patch("usenet_poll.sabnzbd_queue")
 def test_failed_history_status_resolves_without_superseding(mock_queue, mock_history, tmp_path):
     db_path = tmp_path / "review.db"
     old_dir = tmp_path / "library" / "Bizzle" / "Nonstop"
@@ -176,7 +176,7 @@ def test_failed_history_status_resolves_without_superseding(mock_queue, mock_his
     assert (old_dir / "01.flac").read_bytes() == b"old-bad-rip"
 
 
-@patch("usenet_poll._sabnzbd_queue")
+@patch("usenet_poll.sabnzbd_queue")
 def test_sabnzbd_api_error_leaves_row_searching_not_erroring_the_batch(mock_queue, tmp_path):
     db_path = tmp_path / "review.db"
     _seed_searching_row(db_path)
@@ -191,8 +191,8 @@ def test_sabnzbd_api_error_leaves_row_searching_not_erroring_the_batch(mock_queu
 
 
 @patch("usenet_poll.musicbrainz_track_count")
-@patch("usenet_poll._sabnzbd_history")
-@patch("usenet_poll._sabnzbd_queue")
+@patch("usenet_poll.sabnzbd_history")
+@patch("usenet_poll.sabnzbd_queue")
 def test_musicbrainz_lookup_api_error_counts_as_error_not_still_searching(mock_queue, mock_history, mock_count, tmp_path):
     """A genuine API failure in the MusicBrainz track-count lookup must
     surface as an 'errors' outcome, not get folded into 'still_searching'
@@ -241,8 +241,8 @@ def test_musicbrainz_lookup_api_error_counts_as_error_not_still_searching(mock_q
 
 
 @patch("usenet_poll.musicbrainz_track_count")
-@patch("usenet_poll._sabnzbd_history")
-@patch("usenet_poll._sabnzbd_queue")
+@patch("usenet_poll.sabnzbd_history")
+@patch("usenet_poll.sabnzbd_queue")
 def test_supersede_uses_real_path_not_reconstructed_artist_album_dir(mock_queue, mock_history, mock_count, tmp_path):
     """The library's real directory names go through ingress_sweeper.py's
     sanitize() (colon -> full-width colon, etc). A raw artist/album string
@@ -288,8 +288,8 @@ def test_supersede_uses_real_path_not_reconstructed_artist_album_dir(mock_queue,
 
 
 @patch("usenet_poll.musicbrainz_track_count")
-@patch("usenet_poll._sabnzbd_history")
-@patch("usenet_poll._sabnzbd_queue")
+@patch("usenet_poll.sabnzbd_history")
+@patch("usenet_poll.sabnzbd_queue")
 def test_one_row_update_failure_does_not_lose_other_rows_committed_same_cycle(mock_queue, mock_history, mock_count, tmp_path):
     """poll_searching_items commits per-row (Fix 4). If resolving one row's
     UPDATE statement fails, rows already resolved earlier in the same batch

@@ -96,6 +96,30 @@ def grab_release(release: dict, sabnzbd_base: str, api_key: str, category: str) 
     return nzo_ids[0]
 
 
+def sabnzbd_queue(sabnzbd_base: str, api_key: str) -> list[dict]:
+    """Shared by usenet_poll.py (resolution) and review_queue.py (display) --
+    both need the live SABnzbd queue, keyed by nzo_id, and there's no reason
+    for two copies of this GET."""
+    resp = requests.get(
+        f"{sabnzbd_base}/api",
+        params={"mode": "queue", "apikey": api_key, "output": "json"},
+        timeout=HTTP_TIMEOUT_S,
+    )
+    resp.raise_for_status()
+    return resp.json().get("queue", {}).get("slots", [])
+
+
+def sabnzbd_history(sabnzbd_base: str, api_key: str, limit: int = 50) -> list[dict]:
+    """Shared by usenet_poll.py (resolution) and review_queue.py (display)."""
+    resp = requests.get(
+        f"{sabnzbd_base}/api",
+        params={"mode": "history", "apikey": api_key, "output": "json", "limit": limit},
+        timeout=HTTP_TIMEOUT_S,
+    )
+    resp.raise_for_status()
+    return resp.json().get("history", {}).get("slots", [])
+
+
 def remap_sabnzbd_path(storage: str, sabnzbd_staging_prefix: Path, staging_root: Path) -> Path:
     """Translates a SABnzbd-reported `storage` path (SABnzbd's own
     container-side view, e.g. /data/usenet/complete/asaph-staging/<dir>)

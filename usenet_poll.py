@@ -22,32 +22,15 @@ import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
 
-import requests
-
 from lib.resolver import musicbrainz_track_count
-from usenet_flow import check_completeness, remap_sabnzbd_path, rename_into_staging_layout, supersede
-
-HTTP_TIMEOUT_S = 15
-
-
-def _sabnzbd_queue(sabnzbd_base: str, api_key: str) -> list[dict]:
-    resp = requests.get(
-        f"{sabnzbd_base}/api",
-        params={"mode": "queue", "apikey": api_key, "output": "json"},
-        timeout=HTTP_TIMEOUT_S,
-    )
-    resp.raise_for_status()
-    return resp.json().get("queue", {}).get("slots", [])
-
-
-def _sabnzbd_history(sabnzbd_base: str, api_key: str) -> list[dict]:
-    resp = requests.get(
-        f"{sabnzbd_base}/api",
-        params={"mode": "history", "apikey": api_key, "output": "json", "limit": 50},
-        timeout=HTTP_TIMEOUT_S,
-    )
-    resp.raise_for_status()
-    return resp.json().get("history", {}).get("slots", [])
+from usenet_flow import (
+    check_completeness,
+    remap_sabnzbd_path,
+    rename_into_staging_layout,
+    sabnzbd_history,
+    sabnzbd_queue,
+    supersede,
+)
 
 
 def _mark_incomplete(conn, item_id: int, now: str, summary: dict) -> None:
@@ -95,7 +78,7 @@ def poll_searching_items(
             continue
 
         try:
-            queue = _sabnzbd_queue(sabnzbd_base, api_key)
+            queue = sabnzbd_queue(sabnzbd_base, api_key)
         except Exception:
             summary["errors"] += 1
             continue
@@ -105,7 +88,7 @@ def poll_searching_items(
             continue
 
         try:
-            history = _sabnzbd_history(sabnzbd_base, api_key)
+            history = sabnzbd_history(sabnzbd_base, api_key)
         except Exception:
             summary["errors"] += 1
             continue

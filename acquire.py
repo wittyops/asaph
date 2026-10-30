@@ -40,10 +40,10 @@ def acquire_page():
 def acquire_search():
     artist = request.form.get("artist", "").strip()
     album = request.form.get("album", "").strip()
-    if not artist or not album:
+    if not artist and not album:
         return render_template(
             "_acquire_results.html", results=None, artist=artist, album=album,
-            error="Artist and album are both required.",
+            error="Enter an artist, an album, or both.",
         )
 
     releases = search_prowlarr(

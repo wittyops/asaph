@@ -1,12 +1,12 @@
 {% extends "base.html" %}
 {% block content %}
 <h2>Acquire New</h2>
-<p class="hint">Search usenet for a specific artist/album and queue a download directly —
+<p class="hint">Search usenet by artist, album, or both and queue a download directly —
 no need to open Sonarr, Prowlarr, or SABnzbd. The grab lands in your library
 automatically once it finishes and passes the completeness check.</p>
 <form hx-post="/acquire/search" hx-target="#acquire-results">
-  <input type="text" name="artist" placeholder="artist" required>
-  <input type="text" name="album" placeholder="album" required>
+  <input type="text" name="artist" placeholder="artist (optional)">
+  <input type="text" name="album" placeholder="album (optional)">
   <button type="submit" class="primary">Search</button>
 </form>
 <div id="acquire-results"></div>

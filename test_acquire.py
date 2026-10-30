@@ -33,11 +33,41 @@ def test_acquire_page_renders(tmp_path):
     assert b"Search" in resp.data
 
 
-def test_acquire_search_requires_artist_and_album(tmp_path):
+def test_acquire_search_requires_at_least_one_field(tmp_path):
+    app = _make_app(tmp_path / "review.db", tmp_path / "library")
+    resp = app.test_client().post("/acquire/search", data={"artist": "", "album": ""})
+    assert resp.status_code == 200
+    assert b"Enter an artist, an album, or both" in resp.data
+
+
+@patch("acquire.search_prowlarr")
+def test_acquire_search_works_with_artist_only(mock_search, tmp_path):
+    mock_search.return_value = [
+        {"title": "some release", "indexer": "DOGnzb", "size": 100 * 1048576, "age": 10,
+         "categories": [], "downloadUrl": "http://nzb/1"},
+    ]
     app = _make_app(tmp_path / "review.db", tmp_path / "library")
     resp = app.test_client().post("/acquire/search", data={"artist": "Bizzle", "album": ""})
     assert resp.status_code == 200
-    assert b"both required" in resp.data
+    assert b"some release" in resp.data
+    call_args = mock_search.call_args.args
+    assert call_args[0] == "Bizzle"
+    assert call_args[1] == ""
+
+
+@patch("acquire.search_prowlarr")
+def test_acquire_search_works_with_album_only(mock_search, tmp_path):
+    mock_search.return_value = [
+        {"title": "some release", "indexer": "DOGnzb", "size": 100 * 1048576, "age": 10,
+         "categories": [], "downloadUrl": "http://nzb/1"},
+    ]
+    app = _make_app(tmp_path / "review.db", tmp_path / "library")
+    resp = app.test_client().post("/acquire/search", data={"artist": "", "album": "Nonstop"})
+    assert resp.status_code == 200
+    assert b"some release" in resp.data
+    call_args = mock_search.call_args.args
+    assert call_args[0] == ""
+    assert call_args[1] == "Nonstop"
 
 
 @patch("acquire.search_prowlarr")

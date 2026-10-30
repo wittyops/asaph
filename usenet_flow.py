@@ -32,9 +32,13 @@ LOSSLESS_CATEGORY_ID = 3040
 
 
 def search_prowlarr(artist: str, album: str, prowlarr_base: str, api_key: str) -> list[dict]:
-    """Searches Prowlarr for releases matching artist+album. Returns the
-    raw list of release dicts (empty list if none -- a miss is a normal,
-    expected outcome, not an error).
+    """Searches Prowlarr for releases matching artist and/or album -- either
+    may be blank (the manual /acquire search allows searching by just one),
+    but not both; callers are responsible for rejecting that case before
+    calling this, since an empty query string would just return whatever
+    Prowlarr does with no search term. Returns the raw list of release
+    dicts (empty list if none -- a miss is a normal, expected outcome, not
+    an error).
 
     Category 3000 ("Audio") covers every indexer tagged for audio content
     regardless of protocol, including torrent-only indexers (confirmed
@@ -46,7 +50,7 @@ def search_prowlarr(artist: str, album: str, prowlarr_base: str, api_key: str) -
     torrent result reaching grab_release() would KeyError. Filtered here,
     once, so every caller (the review queue's auto-grab and the manual
     /acquire search) gets a safe, usenet-only list."""
-    query = f"{artist} {album}"
+    query = " ".join(part for part in (artist, album) if part)
     resp = requests.get(
         f"{prowlarr_base}/api/v1/search",
         headers={"X-Api-Key": api_key},

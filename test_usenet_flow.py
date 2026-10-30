@@ -28,6 +28,22 @@ def test_search_prowlarr_returns_release_list(mock_get):
 
 
 @patch("usenet_flow.requests.get")
+def test_search_prowlarr_query_with_artist_only(mock_get):
+    mock_get.return_value.json.return_value = []
+    mock_get.return_value.raise_for_status = lambda: None
+    search_prowlarr("Bizzle", "", "http://prowlarr:9696", "fakekey")
+    assert mock_get.call_args.kwargs["params"]["query"] == "Bizzle"
+
+
+@patch("usenet_flow.requests.get")
+def test_search_prowlarr_query_with_album_only(mock_get):
+    mock_get.return_value.json.return_value = []
+    mock_get.return_value.raise_for_status = lambda: None
+    search_prowlarr("", "Nonstop", "http://prowlarr:9696", "fakekey")
+    assert mock_get.call_args.kwargs["params"]["query"] == "Nonstop"
+
+
+@patch("usenet_flow.requests.get")
 def test_search_prowlarr_returns_empty_list_on_no_results(mock_get):
     mock_get.return_value.json.return_value = []
     mock_get.return_value.raise_for_status = lambda: None

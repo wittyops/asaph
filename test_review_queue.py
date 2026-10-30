@@ -15,7 +15,7 @@ def _seed_db(db_path, tmp_path):
             id INTEGER PRIMARY KEY AUTOINCREMENT, path TEXT UNIQUE NOT NULL,
             reason TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'pending',
             flagged_at TEXT NOT NULL, resolved_at TEXT,
-            artist TEXT, album TEXT
+            artist TEXT, album TEXT, nzo_id TEXT
         )
     """)
     f = tmp_path / "bad.flac"
@@ -103,14 +103,22 @@ def test_art_select_embeds_chosen_art(mock_fetch, tmp_path):
     assert resp.status_code == 200
     mock_fetch.assert_called_once_with("abc-123")
 
-@patch("review_queue.trigger_search")
-def test_search_usenet_sets_status_searching(mock_trigger, tmp_path):
-    mock_trigger.return_value = 99
+def _configure_usenet_app(app):
+    app.config["PROWLARR_BASE"] = "http://prowlarr:9696"
+    app.config["PROWLARR_API_KEY"] = "fakeprowlarrkey"
+    app.config["SABNZBD_BASE"] = "http://wn-sabnzbd-01:8080"
+    app.config["SABNZBD_API_KEY"] = "fakesabkey"
+    app.config["SABNZBD_CATEGORY"] = "asaph-staging"
+    return app
+
+@patch("review_queue.grab_release")
+@patch("review_queue.search_prowlarr")
+def test_search_usenet_sets_status_searching_and_stores_nzo_id(mock_search, mock_grab, tmp_path):
+    mock_search.return_value = [{"title": "Nonstop", "downloadUrl": "http://prowlarr/dl/1", "categories": []}]
+    mock_grab.return_value = "nzo-123"
     db_path = tmp_path / "review.db"
     row_id = _seed_db(db_path, tmp_path)
-    app = _make_app(db_path)
-    app.config["LIDARR_BASE"] = "http://lidarr:8686"
-    app.config["LIDARR_API_KEY"] = "fakekey"
+    app = _configure_usenet_app(_make_app(db_path))
     client = app.test_client()
     resp = client.post(
         f"/review/{row_id}/search-usenet",
@@ -118,7 +126,28 @@ def test_search_usenet_sets_status_searching(mock_trigger, tmp_path):
     )
     assert resp.status_code == 200
     import sqlite3
+    row = sqlite3.connect(str(db_path)).execute(
+        "SELECT status, nzo_id FROM review_items WHERE id=?", (row_id,)
+    ).fetchone()
+    assert row[0] == "searching"
+    assert row[1] == "nzo-123"
+
+@patch("review_queue.grab_release")
+@patch("review_queue.search_prowlarr")
+def test_search_usenet_no_results_does_not_set_searching(mock_search, mock_grab, tmp_path):
+    mock_search.return_value = []
+    db_path = tmp_path / "review.db"
+    row_id = _seed_db(db_path, tmp_path)
+    app = _configure_usenet_app(_make_app(db_path))
+    client = app.test_client()
+    resp = client.post(
+        f"/review/{row_id}/search-usenet",
+        data={"artist": "Bizzle", "album": "Nonstop"},
+    )
+    assert resp.status_code == 404
+    mock_grab.assert_not_called()
+    import sqlite3
     status = sqlite3.connect(str(db_path)).execute(
         "SELECT status FROM review_items WHERE id=?", (row_id,)
     ).fetchone()[0]
-    assert status == "searching"
+    assert status == "pending"

@@ -1,5 +1,5 @@
 from unittest.mock import patch, MagicMock
-from resolver import resolve_metadata, acoustid_lookup, fetch_cover_art
+from resolver import resolve_metadata, acoustid_lookup, fetch_cover_art, musicbrainz_track_count
 
 def test_resolve_metadata_trusts_embedded_tags_when_complete():
     tags = {"artist": "Bizzle", "album": "Nonstop", "title": "Warriors"}
@@ -37,3 +37,40 @@ def test_acoustid_lookup_returns_none_on_api_timeout(mock_call):
 def test_fetch_cover_art_returns_none_without_release_id(mock_call):
     assert fetch_cover_art(None) is None
     mock_call.assert_not_called()
+
+@patch("resolver._musicbrainz_release_search_call")
+def test_musicbrainz_track_count_sums_media_track_counts(mock_call):
+    mock_call.return_value = {
+        "releases": [
+            {
+                "title": "Nonstop",
+                "artist-credit": [{"name": "Bizzle"}],
+                "media": [{"track-count": 10}, {"track-count": 2}],
+            }
+        ]
+    }
+    assert musicbrainz_track_count("Bizzle", "Nonstop") == 12
+
+@patch("resolver._musicbrainz_release_search_call")
+def test_musicbrainz_track_count_returns_none_on_no_match(mock_call):
+    mock_call.return_value = {"releases": []}
+    assert musicbrainz_track_count("Nobody", "Nothing") is None
+
+@patch("resolver._musicbrainz_release_search_call")
+def test_musicbrainz_track_count_returns_none_on_ambiguous_match(mock_call):
+    mock_call.return_value = {
+        "releases": [
+            {"title": "Nonstop", "artist-credit": [{"name": "Bizzle"}], "media": [{"track-count": 10}]},
+            {"title": "Nonstop", "artist-credit": [{"name": "Bizzle"}], "media": [{"track-count": 11}]},
+        ]
+    }
+    assert musicbrainz_track_count("Bizzle", "Nonstop") is None
+
+@patch("resolver._musicbrainz_release_search_call")
+def test_musicbrainz_track_count_propagates_real_api_errors(mock_call):
+    mock_call.side_effect = TimeoutError()
+    try:
+        musicbrainz_track_count("Bizzle", "Nonstop")
+        assert False, "expected the API error to propagate"
+    except TimeoutError:
+        pass

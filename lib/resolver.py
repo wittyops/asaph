@@ -96,3 +96,59 @@ def fetch_cover_art(mb_release_id: str | None) -> bytes | None:
         return _cover_art_api_call(mb_release_id)
     except Exception:
         return None
+
+
+MUSICBRAINZ_USER_AGENT = "Asaph/2.0.0 (wittycomp-lab curator)"
+
+
+def _musicbrainz_release_search_call(artist: str, album: str) -> dict:
+    """Direct MusicBrainz release search (ws/2/release, fmt=json). Each
+    result's "media" array already carries a track-count per medium
+    (no separate release-detail fetch needed), so this one call is
+    enough to get an album's total track count on demand."""
+    query = f'artist:"{artist}" AND release:"{album}"'
+    r = requests.get(
+        "https://musicbrainz.org/ws/2/release/",
+        params={"query": query, "fmt": "json"},
+        headers={"User-Agent": MUSICBRAINZ_USER_AGENT},
+        timeout=HTTP_TIMEOUT_S,
+    )
+    r.raise_for_status()
+    return r.json()
+
+
+def musicbrainz_track_count(artist: str, album: str) -> int | None:
+    """Looks up an album's total track count on demand via MusicBrainz's
+    release search (no local lookup table existed before this -- there
+    was no pre-existing MusicBrainz track-count call path in this module
+    to reuse; this is the first one). Returns None, never zero, when the
+    search can't identify a single unambiguous release -- callers must
+    treat None as 'leave it alone,' matching the same safety posture as
+    acoustid_lookup()'s miss case.
+
+    A genuine API failure (timeout, connection error, non-2xx) is NOT
+    caught here -- it propagates to the caller so it can be counted as
+    a real error outcome rather than folded into the ambiguous/not-found
+    case."""
+    data = _musicbrainz_release_search_call(artist, album)
+    releases = data.get("releases", [])
+    artist_l, album_l = artist.strip().lower(), album.strip().lower()
+
+    matches = []
+    for release in releases:
+        title = (release.get("title") or "").strip().lower()
+        if title != album_l:
+            continue
+        credits = release.get("artist-credit", [])
+        names = {(c.get("name") or "").strip().lower() for c in credits if isinstance(c, dict)}
+        if artist_l in names or any(artist_l == n for n in names):
+            matches.append(release)
+
+    if len(matches) != 1:
+        return None
+
+    media = matches[0].get("media", [])
+    if not media:
+        return None
+    total = sum(m.get("track-count", 0) or 0 for m in media)
+    return total or None

@@ -554,8 +554,11 @@ app = Flask(__name__)
 
 from review_queue import review_bp, REVIEW_DB_KEY
 app.config[REVIEW_DB_KEY] = REVIEW_DB
-app.config["LIDARR_BASE"] = os.environ.get("LIDARR_BASE", "http://10.10.30.58:8686")
-app.config["LIDARR_API_KEY"] = os.environ.get("LIDARR_API_KEY", "")
+app.config["PROWLARR_BASE"] = os.environ.get("PROWLARR_BASE", "http://10.10.30.53:9696")
+app.config["PROWLARR_API_KEY"] = os.environ.get("PROWLARR_API_KEY", "")  # nosemgrep
+app.config["SABNZBD_BASE"] = os.environ.get("SABNZBD_BASE", "http://wn-sabnzbd-01:8080")
+app.config["SABNZBD_API_KEY"] = os.environ.get("SABNZBD_API_KEY", "")  # nosemgrep
+app.config["SABNZBD_CATEGORY"] = os.environ.get("SABNZBD_CATEGORY", "asaph-staging")
 app.register_blueprint(review_bp)
 
 @app.route("/health")
@@ -646,10 +649,12 @@ if __name__ == "__main__":
     STAGING_ROOT = Path(os.environ.get("STAGING_ROOT", "/staging"))
     SUPERSEDE_ARCHIVE_ROOT = Path(os.environ.get("SUPERSEDE_ARCHIVE_ROOT", "/library/superseded"))
     LIBRARY_ROOT_FOR_SUPERSEDE = Path("/library")
+    SABNZBD_STAGING_PREFIX = Path(os.environ.get("SABNZBD_STAGING_PREFIX", "/data/usenet/complete/asaph-staging"))
     scheduler.add_job(
         lambda: poll_searching_items(
-            REVIEW_DB, app.config["LIDARR_BASE"], app.config["LIDARR_API_KEY"],
+            REVIEW_DB, app.config["SABNZBD_BASE"], app.config["SABNZBD_API_KEY"],
             STAGING_ROOT, LIBRARY_ROOT_FOR_SUPERSEDE, SUPERSEDE_ARCHIVE_ROOT,
+            SABNZBD_STAGING_PREFIX,
         ),
         "interval", minutes=5, id="usenet_poll",
     )

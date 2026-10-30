@@ -1,10 +1,15 @@
 # usenet_poll.py
-"""Polls Lidarr for completion of searches triggered via the review UI's
+"""Polls SABnzbd for completion of grabs triggered via the review UI's
 "Search usenet" action, and resolves the corresponding review_items row.
 
-Closes the gap between search_usenet() (fires the Lidarr search, sets
-status='searching') and usenet_flow.py's check_completeness()/supersede()
-(built, reviewed, never called by anything until this module exists).
+Closes the gap between search_usenet() (searches Prowlarr, grabs via
+SABnzbd, sets status='searching' with the resulting nzo_id) and
+usenet_flow.py's check_completeness()/supersede() (built, reviewed,
+never called by anything until this module exists).
+
+Correlation is by the `nzo_id` column on review_items, not by
+artist/album name-matching against anything -- SABnzbd's queue/history
+are keyed by nzo_id, so that's the one reliable join key.
 
 Safety posture: every ambiguous case leaves the row in 'searching' rather
 than guessing. A stuck-but-safe row is an acceptable outcome; a
@@ -19,110 +24,96 @@ from pathlib import Path
 
 import requests
 
-from usenet_flow import check_completeness, supersede
+from lib.resolver import musicbrainz_track_count
+from usenet_flow import check_completeness, remap_sabnzbd_path, rename_into_staging_layout, supersede
 
 HTTP_TIMEOUT_S = 15
 
 
-def _lidarr_queue(lidarr_base: str, api_key: str) -> list[dict]:
+def _sabnzbd_queue(sabnzbd_base: str, api_key: str) -> list[dict]:
     resp = requests.get(
-        f"{lidarr_base}/api/v1/queue",
-        headers={"X-Api-Key": api_key},
+        f"{sabnzbd_base}/api",
+        params={"mode": "queue", "apikey": api_key, "output": "json"},
         timeout=HTTP_TIMEOUT_S,
     )
     resp.raise_for_status()
-    data = resp.json()
-    return data.get("records", data) if isinstance(data, dict) else data
+    return resp.json().get("queue", {}).get("slots", [])
 
 
-def _queue_has_match(queue: list[dict], artist: str, album: str) -> bool:
-    artist_l, album_l = artist.lower(), album.lower()
-    for item in queue:
-        item_artist = (item.get("artist", {}) or {}).get("artistName", "")
-        item_album = (item.get("album", {}) or {}).get("title", "")
-        if item_artist.lower() == artist_l and item_album.lower() == album_l:
-            return True
-    return False
-
-
-def _lidarr_album_track_count(lidarr_base: str, api_key: str, artist: str, album: str) -> int | None:
-    """Looks up the artist by name, then finds the matching album's
-    statistics.trackCount. Returns None if the artist/album can't be
-    found unambiguously -- callers must treat None as 'leave it alone',
-    never as zero.
-
-    A genuine API failure (connection error, timeout, non-2xx response) is
-    NOT caught here -- it propagates to the caller so it can be counted as
-    an 'errors' outcome rather than folded into the same bucket as a
-    legitimate not-found/ambiguous lookup. Only the ambiguous-match cases
-    return None."""
-    artists_resp = requests.get(
-        f"{lidarr_base}/api/v1/artist",
-        headers={"X-Api-Key": api_key},
+def _sabnzbd_history(sabnzbd_base: str, api_key: str) -> list[dict]:
+    resp = requests.get(
+        f"{sabnzbd_base}/api",
+        params={"mode": "history", "apikey": api_key, "output": "json", "limit": 50},
         timeout=HTTP_TIMEOUT_S,
     )
-    artists_resp.raise_for_status()
-    matches = [a for a in artists_resp.json() if a.get("artistName", "").lower() == artist.lower()]
-    if len(matches) != 1:
-        return None
-    artist_id = matches[0]["id"]
+    resp.raise_for_status()
+    return resp.json().get("history", {}).get("slots", [])
 
-    albums_resp = requests.get(
-        f"{lidarr_base}/api/v1/album",
-        headers={"X-Api-Key": api_key},
-        params={"artistId": artist_id},
-        timeout=HTTP_TIMEOUT_S,
-    )
-    albums_resp.raise_for_status()
-    album_matches = [a for a in albums_resp.json() if a.get("title", "").lower() == album.lower()]
-    if len(album_matches) != 1:
-        return None
-    return album_matches[0].get("statistics", {}).get("trackCount")
+
+def _mark_incomplete(conn, item_id: int, now: str, summary: dict) -> None:
+    """Shared resolution path for 'grab incomplete/partial' -- no files
+    are moved in this branch, so a failed UPDATE is always safe to retry
+    next cycle."""
+    try:
+        conn.execute(
+            "UPDATE review_items SET status='resolved', resolved_at=?, "
+            "reason=reason || ' [usenet grab incomplete/partial -- left existing library file in place]' "
+            "WHERE id=?",
+            (now, item_id),
+        )
+        conn.commit()
+    except Exception as e:
+        summary["errors"] += 1
+        print(f"usenet_poll: row {item_id} UPDATE failed (no files moved "
+              f"for this row, safe to retry next cycle): {e}")
+        return
+    summary["resolved"] += 1
 
 
 def poll_searching_items(
     db_path: Path,
-    lidarr_base: str,
+    sabnzbd_base: str,
     api_key: str,
     staging_root: Path,
     library_root: Path,
     archive_root: Path,
+    sabnzbd_staging_prefix: Path,
 ) -> dict:
     # timeout=30: a busy-wait tolerance so a brief write from the review UI
     # or a concurrent poll/scan doesn't immediately raise "database is
     # locked" -- see health_scan.py's matching change (Fix 4).
     conn = sqlite3.connect(str(db_path), timeout=30)
     rows = conn.execute(
-        "SELECT id, path, artist, album FROM review_items WHERE status='searching'"
+        "SELECT id, path, artist, album, nzo_id FROM review_items WHERE status='searching'"
     ).fetchall()
 
     summary = {"resolved": 0, "still_searching": 0, "errors": 0}
 
-    for item_id, path, artist, album in rows:
-        if not artist or not album:
-            summary["still_searching"] += 1
-            continue
-        try:
-            queue = _lidarr_queue(lidarr_base, api_key)
-        except Exception:
-            summary["errors"] += 1
-            continue
-
-        if _queue_has_match(queue, artist, album):
-            summary["still_searching"] += 1
-            continue
-
-        staging_dir = staging_root / artist / album
-        if not staging_dir.is_dir():
+    for item_id, path, artist, album, nzo_id in rows:
+        if not artist or not album or not nzo_id:
             summary["still_searching"] += 1
             continue
 
         try:
-            expected_count = _lidarr_album_track_count(lidarr_base, api_key, artist, album)
+            queue = _sabnzbd_queue(sabnzbd_base, api_key)
         except Exception:
             summary["errors"] += 1
             continue
-        if expected_count is None:
+
+        if any(slot.get("nzo_id") == nzo_id for slot in queue):
+            summary["still_searching"] += 1
+            continue
+
+        try:
+            history = _sabnzbd_history(sabnzbd_base, api_key)
+        except Exception:
+            summary["errors"] += 1
+            continue
+
+        history_slot = next((slot for slot in history if slot.get("nzo_id") == nzo_id), None)
+        if history_slot is None:
+            # Neither queue nor history has this nzo_id -- don't know yet.
+            # Never guess; leave it in 'searching'.
             summary["still_searching"] += 1
             continue
 
@@ -135,6 +126,38 @@ def poll_searching_items(
         # real directory, so its parent is the one safe source of truth.
         old_dir = Path(path).parent
         now = datetime.now(timezone.utc).isoformat()
+
+        if history_slot.get("status") != "Completed":
+            # Failed (or any other terminal non-Completed status) -- same
+            # outcome as an incomplete/partial grab: mark resolved, leave
+            # the old library file in place.
+            _mark_incomplete(conn, item_id, now, summary)
+            continue
+
+        storage = history_slot.get("storage")
+        try:
+            remapped = remap_sabnzbd_path(storage, sabnzbd_staging_prefix, staging_root)
+        except Exception:
+            # storage doesn't start with the configured prefix -- category
+            # config drifted. Treat as an error outcome, don't crash the
+            # whole poll cycle, and never guess a path.
+            summary["errors"] += 1
+            continue
+
+        try:
+            staging_dir = rename_into_staging_layout(remapped, artist, album, staging_root)
+        except Exception:
+            summary["errors"] += 1
+            continue
+
+        try:
+            expected_count = musicbrainz_track_count(artist, album)
+        except Exception:
+            summary["errors"] += 1
+            continue
+        if expected_count is None:
+            summary["still_searching"] += 1
+            continue
 
         if check_completeness(staging_dir, expected_count):
             if old_dir.exists():
@@ -164,20 +187,7 @@ def poll_searching_items(
                 continue
             summary["resolved"] += 1
         else:
-            try:
-                conn.execute(
-                    "UPDATE review_items SET status='resolved', resolved_at=?, "
-                    "reason=reason || ' [usenet grab incomplete/partial -- left existing library file in place]' "
-                    "WHERE id=?",
-                    (now, item_id),
-                )
-                conn.commit()
-            except Exception as e:
-                summary["errors"] += 1
-                print(f"usenet_poll: row {item_id} UPDATE failed (no files moved "
-                      f"for this row, safe to retry next cycle): {e}")
-                continue
-            summary["resolved"] += 1
+            _mark_incomplete(conn, item_id, now, summary)
 
     conn.close()
     return summary

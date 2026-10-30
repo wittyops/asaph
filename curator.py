@@ -553,13 +553,19 @@ class IngressHandler(FileSystemEventHandler):
 app = Flask(__name__)
 
 from review_queue import review_bp, REVIEW_DB_KEY
+from acquire import acquire_bp
 app.config[REVIEW_DB_KEY] = REVIEW_DB
 app.config["PROWLARR_BASE"] = os.environ.get("PROWLARR_BASE", "http://10.10.30.53:9696")
 app.config["PROWLARR_API_KEY"] = os.environ.get("PROWLARR_API_KEY", "")  # nosemgrep
 app.config["SABNZBD_BASE"] = os.environ.get("SABNZBD_BASE", "http://wn-sabnzbd-01:8080")
 app.config["SABNZBD_API_KEY"] = os.environ.get("SABNZBD_API_KEY", "")  # nosemgrep
 app.config["SABNZBD_CATEGORY"] = os.environ.get("SABNZBD_CATEGORY", "asaph-staging")
+# Primary general-purpose library only -- christian-library/instrumentals-library
+# are specialized collections, not an appropriate default target for a
+# generic "search any artist/album" acquisition.
+app.config["LIBRARY_ROOT"] = Path("/library")
 app.register_blueprint(review_bp)
+app.register_blueprint(acquire_bp)
 
 @app.route("/")
 def api_index():

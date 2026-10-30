@@ -1,0 +1,41 @@
+{% if error %}
+<p class="result-msg">{{ error }}</p>
+{% elif results|length == 0 %}
+<p class="result-msg">No usenet results for "{{ artist }}" / "{{ album }}".</p>
+{% else %}
+<table>
+  <thead>
+    <tr>
+      <th>Release</th>
+      <th>Indexer</th>
+      <th>Size</th>
+      <th>Age</th>
+      <th></th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for r in results %}
+    <tr>
+      <td>
+        {{ r.title }}
+        {% if r.categories and r.categories|selectattr('id', 'equalto', 3040)|list %}
+          <span class="badge validated">lossless</span>
+        {% endif %}
+      </td>
+      <td class="path">{{ r.indexer }}</td>
+      <td class="path">{% if r.size %}{{ (r.size / 1048576) | round(1) }} MB{% endif %}</td>
+      <td class="path">{% if r.age is not none %}{{ r.age }}d{% endif %}</td>
+      <td>
+        <button
+          class="approve"
+          hx-post="/acquire/grab"
+          hx-target="#acquire-grab-result"
+          hx-vals='{"artist": {{ artist|tojson }}, "album": {{ album|tojson }}, "download_url": {{ r.downloadUrl|tojson }}}'
+        >Grab</button>
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endif %}
+<div id="acquire-grab-result"></div>

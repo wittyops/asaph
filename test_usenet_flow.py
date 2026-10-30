@@ -17,10 +17,10 @@ from usenet_flow import (
 
 @patch("usenet_flow.requests.get")
 def test_search_prowlarr_returns_release_list(mock_get):
-    mock_get.return_value.json.return_value = [{"title": "Nonstop"}]
+    mock_get.return_value.json.return_value = [{"title": "Nonstop", "protocol": "usenet"}]
     mock_get.return_value.raise_for_status = lambda: None
     releases = search_prowlarr("Bizzle", "Nonstop", "http://prowlarr:9696", "fakekey")
-    assert releases == [{"title": "Nonstop"}]
+    assert releases == [{"title": "Nonstop", "protocol": "usenet"}]
     call_kwargs = mock_get.call_args.kwargs
     assert call_kwargs["params"]["categories"] == 3000
     assert "Bizzle" in call_kwargs["params"]["query"]
@@ -32,6 +32,21 @@ def test_search_prowlarr_returns_empty_list_on_no_results(mock_get):
     mock_get.return_value.json.return_value = []
     mock_get.return_value.raise_for_status = lambda: None
     assert search_prowlarr("Nobody", "Nothing", "http://prowlarr:9696", "fakekey") == []
+
+
+@patch("usenet_flow.requests.get")
+def test_search_prowlarr_filters_out_non_usenet_protocol(mock_get):
+    # Category 3000 ("Audio") returns torrent-protocol results too (confirmed
+    # live against the lab's Prowlarr) -- grab_release() always reads
+    # downloadUrl, which torrent results lack, so they must never reach a
+    # caller of this function.
+    mock_get.return_value.json.return_value = [
+        {"title": "torrent result", "protocol": "torrent", "magnetUrl": "magnet:..."},
+        {"title": "usenet result", "protocol": "usenet", "downloadUrl": "http://nzb/1"},
+    ]
+    mock_get.return_value.raise_for_status = lambda: None
+    releases = search_prowlarr("Bizzle", "Nonstop", "http://prowlarr:9696", "fakekey")
+    assert releases == [{"title": "usenet result", "protocol": "usenet", "downloadUrl": "http://nzb/1"}]
 
 
 def test_pick_best_release_returns_none_for_empty_list():

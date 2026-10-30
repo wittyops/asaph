@@ -34,7 +34,18 @@ LOSSLESS_CATEGORY_ID = 3040
 def search_prowlarr(artist: str, album: str, prowlarr_base: str, api_key: str) -> list[dict]:
     """Searches Prowlarr for releases matching artist+album. Returns the
     raw list of release dicts (empty list if none -- a miss is a normal,
-    expected outcome, not an error)."""
+    expected outcome, not an error).
+
+    Category 3000 ("Audio") covers every indexer tagged for audio content
+    regardless of protocol, including torrent-only indexers (confirmed
+    live 2026-10-30: a search against the lab's real Prowlarr instance
+    returned a torrent-protocol Knaben result alongside the usenet ones).
+    grab_release() always reads release["downloadUrl"], which only
+    torrent-protocol results lack -- so this whole pipeline is usenet-only
+    by design (see the module docstring on why Lidarr was dropped), and a
+    torrent result reaching grab_release() would KeyError. Filtered here,
+    once, so every caller (the review queue's auto-grab and the manual
+    /acquire search) gets a safe, usenet-only list."""
     query = f"{artist} {album}"
     resp = requests.get(
         f"{prowlarr_base}/api/v1/search",
@@ -44,7 +55,16 @@ def search_prowlarr(artist: str, album: str, prowlarr_base: str, api_key: str) -
     )
     resp.raise_for_status()
     data = resp.json()
-    return data if isinstance(data, list) else []
+    if not isinstance(data, list):
+        return []
+    return [r for r in data if r.get("protocol") == "usenet"]
+
+
+def is_lossless(release: dict) -> bool:
+    for cat in release.get("categories", []) or []:
+        if cat.get("id") == LOSSLESS_CATEGORY_ID:
+            return True
+    return False
 
 
 def pick_best_release(releases: list[dict]) -> dict | None:
@@ -54,12 +74,6 @@ def pick_best_release(releases: list[dict]) -> dict | None:
     as a 'no results' outcome, never guessing a release."""
     if not releases:
         return None
-
-    def is_lossless(release: dict) -> bool:
-        for cat in release.get("categories", []) or []:
-            if cat.get("id") == LOSSLESS_CATEGORY_ID:
-                return True
-        return False
 
     for release in releases:
         if is_lossless(release):

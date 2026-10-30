@@ -101,7 +101,18 @@
     .detail-table td:first-child { color: var(--text-dim); width: 90px; }
     form { margin: 12px 0; }
     .hint { color: var(--text-dim); font-size: 12px; margin: 4px 0 10px 0; }
+
+    nav { display: flex; gap: 16px; margin-bottom: 20px; border-bottom: 1px solid var(--border); padding-bottom: 12px; }
+    nav a { color: var(--text-dim); font-size: 13px; text-decoration: none; }
+    nav a.active { color: var(--text); font-weight: 600; }
+    nav a:hover { color: var(--text); text-decoration: none; }
   </style>
 </head>
-<body>{% block content %}{% endblock %}</body>
+<body>
+  <nav>
+    <a href="/review" class="{{ 'active' if nav == 'review' else '' }}">Review Queue</a>
+    <a href="/acquire" class="{{ 'active' if nav == 'acquire' else '' }}">Acquire New</a>
+  </nav>
+  {% block content %}{% endblock %}
+</body>
 </html>

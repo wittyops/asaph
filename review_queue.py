@@ -151,7 +151,7 @@ def review_page():
     counts = _counts(conn)
     conn.close()
     items = [_row_dict(r) for r in rows]
-    return render_template("review_queue.html", items=items, counts=counts)
+    return render_template("review_queue.html", items=items, counts=counts, nav="review")
 
 
 @review_bp.route("/review/<int:item_id>/approve", methods=["POST"])
@@ -232,7 +232,7 @@ def detail(item_id: int):
             current_app.config["SABNZBD_BASE"],
             current_app.config["SABNZBD_API_KEY"],
         )
-    return render_template("track_detail.html", item=item, live_state=live_state)
+    return render_template("track_detail.html", item=item, live_state=live_state, nav="review")
 
 
 @review_bp.route("/review/<int:item_id>/search-usenet", methods=["POST"])

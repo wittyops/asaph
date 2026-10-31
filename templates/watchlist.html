@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>Watchlist</h2>
+<p class="hint">Watch an artist (optionally a specific album) — a background check finds new
+usenet releases and lists them below for one-click approval. Nothing grabs automatically;
+every download still needs a human click.</p>
+<form hx-post="/watchlist/add" hx-target="#watchlist-content" hx-swap="innerHTML">
+  <input type="text" name="artist" placeholder="artist (required)" required>
+  <input type="text" name="album" placeholder="album (optional — blank watches everything)">
+  <button type="submit" class="primary">Watch</button>
+</form>
+<div id="watchlist-content">
+  {% include "_watchlist_content.html" %}
+</div>
+{% endblock %}

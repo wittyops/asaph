@@ -32,6 +32,37 @@ def init_review_db(db_path: Path) -> None:
     for col in ("artist", "album", "nzo_id"):
         if col not in existing_cols:
             conn.execute(f"ALTER TABLE review_items ADD COLUMN {col} TEXT")
+
+    # watchlist / watchlist_candidates: a standing "notify me, don't grab
+    # blindly" list (see watchlist.py, watchlist_poll.py). album is '' (not
+    # NULL) for an artist-wide watch, so UNIQUE(artist, album) works as a
+    # real constraint -- SQLite treats every NULL as distinct, which would
+    # let duplicate artist-wide watches through.
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS watchlist (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            artist TEXT NOT NULL,
+            album TEXT NOT NULL DEFAULT '',
+            added_at TEXT NOT NULL,
+            last_checked_at TEXT,
+            UNIQUE(artist, album)
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS watchlist_candidates (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            watchlist_id INTEGER NOT NULL REFERENCES watchlist(id),
+            title TEXT NOT NULL,
+            download_url TEXT NOT NULL,
+            indexer TEXT,
+            size INTEGER,
+            guessed_artist TEXT,
+            guessed_album TEXT,
+            found_at TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'pending',
+            UNIQUE(watchlist_id, download_url)
+        )
+    """)
     conn.commit()
     conn.close()
 

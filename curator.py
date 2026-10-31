@@ -554,6 +554,7 @@ app = Flask(__name__)
 
 from review_queue import review_bp, REVIEW_DB_KEY
 from acquire import acquire_bp
+from watchlist import watchlist_bp
 app.config[REVIEW_DB_KEY] = REVIEW_DB
 app.config["PROWLARR_BASE"] = os.environ.get("PROWLARR_BASE", "http://10.10.30.53:9696")
 app.config["PROWLARR_API_KEY"] = os.environ.get("PROWLARR_API_KEY", "")  # nosemgrep
@@ -566,6 +567,7 @@ app.config["SABNZBD_CATEGORY"] = os.environ.get("SABNZBD_CATEGORY", "asaph-stagi
 app.config["LIBRARY_ROOT"] = Path("/library")
 app.register_blueprint(review_bp)
 app.register_blueprint(acquire_bp)
+app.register_blueprint(watchlist_bp)
 
 @app.route("/")
 def api_index():
@@ -667,6 +669,15 @@ if __name__ == "__main__":
             SABNZBD_STAGING_PREFIX,
         ),
         "interval", minutes=5, id="usenet_poll",
+    )
+
+    from watchlist_poll import poll_watchlist
+    WATCHLIST_INTERVAL_HOURS = int(os.environ.get("WATCHLIST_INTERVAL_HOURS", "12"))
+    scheduler.add_job(
+        lambda: poll_watchlist(
+            REVIEW_DB, app.config["PROWLARR_BASE"], app.config["PROWLARR_API_KEY"],
+        ),
+        "interval", hours=WATCHLIST_INTERVAL_HOURS, id="watchlist_poll",
     )
 
     scheduler.start()

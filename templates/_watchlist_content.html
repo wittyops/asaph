@@ -1,0 +1,81 @@
+<h3>Pending candidates ({{ candidates|length }})</h3>
+{% if candidates|length == 0 %}
+<p class="result-msg">Nothing new found yet.</p>
+{% else %}
+<table>
+  <thead>
+    <tr>
+      <th>Release</th>
+      <th>Watching</th>
+      <th>Indexer</th>
+      <th>Size</th>
+      <th>Artist / Album</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for c in candidates %}
+    <tr id="candidate-row-{{ c.id }}">
+      <td>{{ c.title }}</td>
+      <td class="path">{{ c.watch_artist }}{% if c.watch_album %} — {{ c.watch_album }}{% endif %}</td>
+      <td class="path">{{ c.indexer }}</td>
+      <td class="path">{% if c.size %}{{ (c.size / 1048576) | round(1) }} MB{% endif %}</td>
+      <td id="candidate-cell-{{ c.id }}">
+        <form
+          hx-post="/watchlist/candidate/{{ c.id }}/approve"
+          hx-target="#candidate-cell-{{ c.id }}"
+          hx-swap="innerHTML"
+          style="display:flex;gap:6px;align-items:center;margin:0;"
+        >
+          <input type="text" name="artist" placeholder="artist (required)" value="{{ c.guess_artist }}" required style="width:90px">
+          <input type="text" name="album" placeholder="album (required)" value="{{ c.guess_album }}" required style="width:90px">
+          <button type="submit" class="approve">Grab</button>
+          <button
+            type="button"
+            class="delete"
+            hx-post="/watchlist/candidate/{{ c.id }}/dismiss"
+            hx-target="#candidate-row-{{ c.id }}"
+            hx-swap="outerHTML"
+          >Dismiss</button>
+        </form>
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endif %}
+
+<h3>Watching ({{ entries|length }})</h3>
+{% if entries|length == 0 %}
+<p class="result-msg">Not watching anything yet — add an artist above.</p>
+{% else %}
+<table>
+  <thead>
+    <tr>
+      <th>Artist</th>
+      <th>Album</th>
+      <th>Added</th>
+      <th>Last checked</th>
+      <th></th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for e in entries %}
+    <tr>
+      <td>{{ e.artist }}</td>
+      <td class="path">{{ e.album or '(any album)' }}</td>
+      <td class="path">{{ e.added_at[:10] }}</td>
+      <td class="path">{{ e.last_checked_at[:10] if e.last_checked_at else 'not yet' }}</td>
+      <td>
+        <button
+          class="delete"
+          hx-post="/watchlist/{{ e.id }}/remove"
+          hx-target="#watchlist-content"
+          hx-swap="innerHTML"
+          hx-confirm="Stop watching {{ e.artist }}{% if e.album %} / {{ e.album }}{% endif %}?"
+        >Remove</button>
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endif %}

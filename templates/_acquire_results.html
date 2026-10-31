@@ -13,8 +13,7 @@ even if your search only used one of the two fields.</p>
       <th>Indexer</th>
       <th>Size</th>
       <th>Age</th>
-      <th>Artist / Album</th>
-      <th></th>
+      <th colspan="2">Artist / Album</th>
     </tr>
   </thead>
   <tbody>
@@ -29,19 +28,18 @@ even if your search only used one of the two fields.</p>
       <td class="path">{{ r.indexer }}</td>
       <td class="path">{% if r.size %}{{ (r.size / 1048576) | round(1) }} MB{% endif %}</td>
       <td class="path">{% if r.age is not none %}{{ r.age }}d{% endif %}</td>
-      <td>
-        <input type="text" id="artist-{{ loop.index }}" name="artist" placeholder="artist" value="{{ artist }}" style="width:90px">
-        <input type="text" id="album-{{ loop.index }}" name="album" placeholder="album" value="{{ album }}" style="width:90px">
-      </td>
-      <td id="grab-cell-{{ loop.index }}">
-        <button
-          class="approve"
+      <td colspan="2" id="grab-cell-{{ loop.index }}">
+        <form
           hx-post="/acquire/grab"
           hx-target="#grab-cell-{{ loop.index }}"
           hx-swap="innerHTML"
-          hx-include="#artist-{{ loop.index }}, #album-{{ loop.index }}"
           hx-vals='{"download_url": {{ r.downloadUrl|tojson }}}'
-        >Grab</button>
+          style="display:flex;gap:6px;align-items:center;margin:0;"
+        >
+          <input type="text" name="artist" placeholder="artist (required)" value="{{ artist }}" required style="width:90px">
+          <input type="text" name="album" placeholder="album (required)" value="{{ album }}" required style="width:90px">
+          <button type="submit" class="approve">Grab</button>
+        </form>
       </td>
     </tr>
     {% endfor %}

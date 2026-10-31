@@ -1,7 +1,11 @@
 import subprocess
 from pathlib import Path
 import pytest
-from validator import decode_check, signal_heuristic_check, checksum_verify
+import mutagen
+import mutagen.flac
+from validator import check_metadata, decode_check, signal_heuristic_check, checksum_verify
+
+JPEG_BYTES = b"\xff\xd8\xff\xe0" + b"\x00" * 64 + b"\xff\xd9"
 
 def _make_silent_flac(tmp_path, seconds=2) -> Path:
     out = tmp_path / "silent.flac"
@@ -69,3 +73,51 @@ def test_signal_heuristic_flags_clipped_audio(tmp_path):
 def test_checksum_verify_returns_none_without_sidecar(tmp_path):
     f = _make_silent_flac(tmp_path)
     assert checksum_verify(f, sfv_path=None) is None
+
+
+def test_check_metadata_flags_missing_tags_and_art(tmp_path):
+    f = _make_tone_flac(tmp_path, "untagged.flac")
+    issues = check_metadata(f)
+    assert "missing title" in issues
+    assert "missing artist" in issues
+    assert "missing album" in issues
+    assert "no album art (embedded or folder)" in issues
+
+
+def test_check_metadata_clean_with_tags_and_embedded_art(tmp_path):
+    f = _make_tone_flac(tmp_path, "tagged.flac")
+    audio = mutagen.File(str(f), easy=True)
+    audio["title"] = "Test Title"
+    audio["artist"] = "Test Artist"
+    audio["album"] = "Test Album"
+    audio.save()
+
+    flac = mutagen.flac.FLAC(str(f))
+    pic = mutagen.flac.Picture()
+    pic.data = JPEG_BYTES
+    pic.type = 3
+    pic.mime = "image/jpeg"
+    flac.add_picture(pic)
+    flac.save()
+
+    assert check_metadata(f) == []
+
+
+def test_check_metadata_accepts_folder_art_without_embedded_art(tmp_path):
+    f = _make_tone_flac(tmp_path, "tagged_no_embed.flac")
+    audio = mutagen.File(str(f), easy=True)
+    audio["title"] = "Test Title"
+    audio["artist"] = "Test Artist"
+    audio["album"] = "Test Album"
+    audio.save()
+    (tmp_path / "cover.jpg").write_bytes(JPEG_BYTES)
+
+    assert check_metadata(f) == []
+
+
+def test_check_metadata_reports_error_on_unreadable_file(tmp_path):
+    f = tmp_path / "not-audio.flac"
+    f.write_bytes(b"not actually a flac file")
+    issues = check_metadata(f)
+    assert len(issues) == 1
+    assert "mutagen" in issues[0] or "metadata error" in issues[0]

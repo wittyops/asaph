@@ -23,7 +23,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from lib.resolver import musicbrainz_track_count
+from lib.validator import check_metadata
 from usenet_flow import (
+    AUDIO_EXTENSIONS,
     check_completeness,
     remap_sabnzbd_path,
     rename_into_staging_layout,
@@ -31,6 +33,41 @@ from usenet_flow import (
     sabnzbd_queue,
     supersede,
 )
+
+
+def _check_promoted_metadata(final_dir: Path) -> tuple[bool, str]:
+    """Runs check_metadata() on every track at its final, post-promotion
+    library path. check_completeness() already proved these files decode
+    and the track count matches -- this is a SEPARATE check (tags, embedded
+    art) that nothing in the usenet flow ran before this. Never blocks or
+    reverses the promotion: the file is still the best available copy
+    either way. Pure function, no DB access -- the caller folds the result
+    into the same UPDATE that resolves (or doesn't resolve) the row, so
+    there's one atomic write instead of two.
+
+    Returns (clean, suffix). When clean is False, the caller should leave
+    status='pending' on this SAME row rather than resolving it, so it flows
+    back through the existing review queue UI -- relabel/art-select -- for
+    a human fix. Originally this spawned a brand new review_items row for a
+    gap, but the promoted file sits at the exact path review_items.path
+    already has UNIQUE'd for this row -- INSERTing a second row at that
+    path always violated the constraint and silently no-opped. Reusing the
+    row instead sidesteps that entirely."""
+    tracks = sorted(
+        p for p in final_dir.rglob("*")
+        if p.is_file() and p.suffix.lower() in AUDIO_EXTENSIONS
+    )
+    flagged = [(t, check_metadata(t)) for t in tracks]
+    flagged = [(t, issues) for t, issues in flagged if issues]
+
+    if not flagged:
+        return True, " [metadata check: clean]"
+
+    _, first_issues = flagged[0]
+    summary_text = f"{len(flagged)}/{len(tracks)} track(s) have gaps: {', '.join(first_issues)}"
+    if len(flagged) > 1:
+        summary_text += " (+others)"
+    return False, f" [metadata check: {summary_text} -- needs relabel/art fix]"
 
 
 def _mark_incomplete(conn, item_id: int, now: str, summary: dict) -> None:
@@ -157,26 +194,57 @@ def poll_searching_items(
             else:
                 old_dir.parent.mkdir(parents=True, exist_ok=True)
                 staging_dir.rename(old_dir)
+
+            # old_dir is now the final, real library path (supersede()/
+            # rename() above just put the promoted files there) -- check
+            # metadata there, not in staging, so a later relabel/art-select
+            # fix targets the actual library file. A check failure here
+            # (ffprobe missing, permissions, etc.) must not be mistaken for
+            # a metadata GAP -- fall back to "clean" (don't block on an
+            # unrelated tooling error) but still surface it as an error.
             try:
-                conn.execute(
-                    "UPDATE review_items SET status='resolved', resolved_at=?, "
-                    "reason=reason || ' [usenet grab complete, superseded old library files]' "
-                    "WHERE id=?",
-                    (now, item_id),
-                )
+                metadata_clean, metadata_suffix = _check_promoted_metadata(old_dir)
+            except Exception as e:
+                summary["errors"] += 1
+                print(f"usenet_poll: row {item_id} metadata check itself failed "
+                      f"(promotion already succeeded, not affected): {e}")
+                metadata_clean, metadata_suffix = True, " [metadata check: error, not run]"
+
+            try:
+                if metadata_clean:
+                    conn.execute(
+                        "UPDATE review_items SET status='resolved', resolved_at=?, "
+                        "reason=reason || ? WHERE id=?",
+                        (now, " [usenet grab complete, superseded old library files]" + metadata_suffix, item_id),
+                    )
+                else:
+                    # status was 'searching' going into this cycle --
+                    # must be set explicitly to 'pending' here, not left
+                    # alone, or poll_searching_items's own WHERE
+                    # status='searching' query would pick this row up
+                    # again every cycle forever (the nzo_id/history lookup
+                    # would still resolve it the same way each time, just
+                    # endlessly re-running this same metadata check).
+                    # Not 'resolved' though -- it needs a human fix, and
+                    # 'pending' is what puts it back in the review queue.
+                    conn.execute(
+                        "UPDATE review_items SET status='pending', reason=reason || ? WHERE id=?",
+                        (" [usenet grab complete, superseded old library files]" + metadata_suffix, item_id),
+                    )
                 conn.commit()
             except Exception as e:
-                # Files have already been moved by check_completeness()'s
-                # True branch above -- that's done and can't be silently
-                # undone. If the row update itself fails (e.g. a lock that
-                # outlasts the busy timeout), surface it as an error rather
-                # than losing track of the fact that this row's on-disk
-                # state no longer matches its DB status, and don't let it
-                # abort rows already committed earlier in this same cycle.
+                # Files have already been moved above -- that's done and
+                # can't be silently undone. If the row update itself fails
+                # (e.g. a lock that outlasts the busy timeout), surface it
+                # as an error rather than losing track of the fact that
+                # this row's on-disk state no longer matches its DB status,
+                # and don't let it abort rows already committed earlier in
+                # this same cycle.
                 summary["errors"] += 1
                 print(f"usenet_poll: row {item_id} UPDATE failed after files were "
                       f"already moved (dir now in sync, DB status stale): {e}")
                 continue
+
             summary["resolved"] += 1
         else:
             _mark_incomplete(conn, item_id, now, summary)

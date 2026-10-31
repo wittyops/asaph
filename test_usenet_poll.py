@@ -7,6 +7,8 @@ from unittest.mock import patch
 
 import sys
 sys.path.insert(0, str(Path(__file__).parent))
+import mutagen
+import mutagen.flac
 from usenet_poll import poll_searching_items
 
 
@@ -43,6 +45,43 @@ def _make_valid_flac(path):
          "-t", "1", "-y", str(path)],
         check=True, capture_output=True,
     )
+
+
+def _make_real_jpeg_bytes(tmp_path) -> bytes:
+    """A deliberately-truncated/fake JPEG (just SOI/EOI marker bytes) is
+    fine for tests that only read the picture back via mutagen, but ffmpeg
+    treats an embedded picture as its own (attached_pic) stream and probes
+    it during decode -- a malformed one makes decode_check() falsely flag
+    the whole file as corrupt even though the AUDIO is perfectly fine
+    (confirmed live 2026-10-31: real, valid album art does not trigger
+    this). Tests here run decode_check() on the result via
+    check_completeness(), so they need a real one."""
+    out = tmp_path / "_fixture_art.jpg"
+    subprocess.run(
+        ["ffmpeg", "-y", "-f", "lavfi", "-i", "color=c=red:s=16x16",
+         "-frames:v", "1", str(out)],
+        check=True, capture_output=True,
+    )
+    return out.read_bytes()
+
+
+def _make_tagged_flac(path, title="Track", artist="Bizzle", album="Nonstop"):
+    """Like _make_valid_flac but with tags + embedded art, for metadata-
+    check tests specifically -- _make_valid_flac is deliberately bare for
+    every other test in this file, which don't care about metadata."""
+    _make_valid_flac(path)
+    audio = mutagen.File(str(path), easy=True)
+    audio["title"] = title
+    audio["artist"] = artist
+    audio["album"] = album
+    audio.save()
+    flac = mutagen.flac.FLAC(str(path))
+    pic = mutagen.flac.Picture()
+    pic.data = _make_real_jpeg_bytes(path.parent)
+    pic.type = 3
+    pic.mime = "image/jpeg"
+    flac.add_picture(pic)
+    flac.save()
 
 
 def _poll(db_path, tmp_path, **kwargs):
@@ -94,8 +133,13 @@ def test_complete_history_resolves_and_supersedes(mock_queue, mock_history, mock
     sab_dir = SABNZBD_PREFIX / "Some.Release.Folder"
     real_sab_dir = tmp_path / "staging" / "Some.Release.Folder"
     real_sab_dir.mkdir(parents=True)
-    _make_valid_flac(real_sab_dir / "01.flac")
-    _make_valid_flac(real_sab_dir / "02.flac")
+    # Tagged, not _make_valid_flac -- this test is about supersede
+    # mechanics, not metadata; an untagged fixture would trip the
+    # post-promotion metadata check and leave the row 'pending' instead
+    # of 'resolved', which is a different test (see
+    # test_promoted_file_with_missing_metadata_stays_pending_for_review).
+    _make_tagged_flac(real_sab_dir / "01.flac")
+    _make_tagged_flac(real_sab_dir / "02.flac")
     mock_history.return_value = [
         {"nzo_id": "nzo-1", "status": "Completed", "storage": str(sab_dir)},
     ]
@@ -206,7 +250,10 @@ def test_musicbrainz_lookup_api_error_counts_as_error_not_still_searching(mock_q
     sab_dir = SABNZBD_PREFIX / "Some.Release.Folder"
     real_sab_dir = tmp_path / "staging" / "Some.Release.Folder"
     real_sab_dir.mkdir(parents=True)
-    _make_valid_flac(real_sab_dir / "01.flac")
+    # Tagged -- this test is about the MusicBrainz retry path, not
+    # metadata; an untagged fixture would leave the row 'pending' on the
+    # second (successful) cycle instead of 'resolved'.
+    _make_tagged_flac(real_sab_dir / "01.flac")
     mock_history.return_value = [
         {"nzo_id": "nzo-1", "status": "Completed", "storage": str(sab_dir)},
     ]
@@ -320,7 +367,10 @@ def test_one_row_update_failure_does_not_lose_other_rows_committed_same_cycle(mo
         sab_dir_name = f"Some.Release.Folder.{suffix}"
         real_sab_dir = tmp_path / "staging" / sab_dir_name
         real_sab_dir.mkdir(parents=True)
-        _make_valid_flac(real_sab_dir / "01.flac")
+        # Tagged -- this test is about per-row commit isolation under a
+        # flaky connection, not metadata; an untagged fixture would leave
+        # row A 'pending' instead of 'resolved', which is a different test.
+        _make_tagged_flac(real_sab_dir / "01.flac")
         sab_dirs[suffix] = SABNZBD_PREFIX / sab_dir_name
         old_dir.mkdir(parents=True)
         (old_dir / "01.flac").write_bytes(b"old-bad-rip")
@@ -330,9 +380,11 @@ def test_one_row_update_failure_does_not_lose_other_rows_committed_same_cycle(mo
         {"nzo_id": "nzo-b", "status": "Completed", "storage": str(sab_dirs["b"])},
     ]
 
-    # Row A resolves normally. Row B's UPDATE fails -- simulate via a thin
-    # wrapper around the real connection (sqlite3.Connection is a C type and
-    # can't be monkeypatched directly) that raises only on the 2nd UPDATE.
+    # Row A resolves normally (1 UPDATE -- resolution + the metadata-check
+    # suffix are a single combined write). Row B's resolve UPDATE (the 2nd
+    # UPDATE overall) fails -- simulate via a thin wrapper around the real
+    # connection (sqlite3.Connection is a C type and can't be monkeypatched
+    # directly).
     call_state = {"updates_seen": 0}
 
     class FlakyConnWrapper:
@@ -383,3 +435,80 @@ def test_row_without_nzo_id_stays_searching(tmp_path):
     result = _poll(db_path, tmp_path)
 
     assert result == {"resolved": 0, "still_searching": 1, "errors": 0}
+
+
+@patch("usenet_poll.musicbrainz_track_count")
+@patch("usenet_poll.sabnzbd_history")
+@patch("usenet_poll.sabnzbd_queue")
+def test_promoted_file_with_clean_metadata_does_not_flag_a_new_row(mock_queue, mock_history, mock_count, tmp_path):
+    db_path = tmp_path / "review.db"
+    old_dir = tmp_path / "library" / "Bizzle" / "Nonstop"
+    _seed_searching_row(db_path, path=old_dir / "01.flac")
+    mock_queue.return_value = []
+    mock_count.return_value = 1
+
+    sab_dir = SABNZBD_PREFIX / "Some.Release.Folder"
+    real_sab_dir = tmp_path / "staging" / "Some.Release.Folder"
+    real_sab_dir.mkdir(parents=True)
+    _make_tagged_flac(real_sab_dir / "01.flac")
+    mock_history.return_value = [
+        {"nzo_id": "nzo-1", "status": "Completed", "storage": str(sab_dir)},
+    ]
+    old_dir.mkdir(parents=True)
+    (old_dir / "01.flac").write_bytes(b"old-bad-rip")
+
+    result = _poll(db_path, tmp_path)
+
+    assert result == {"resolved": 1, "still_searching": 0, "errors": 0}
+    conn = sqlite3.connect(str(db_path))
+    rows = conn.execute("SELECT status, reason FROM review_items").fetchall()
+    conn.close()
+    assert len(rows) == 1, "clean metadata must not flag a second review_items row"
+    assert "[metadata check: clean]" in rows[0][1]
+
+
+@patch("usenet_poll.musicbrainz_track_count")
+@patch("usenet_poll.sabnzbd_history")
+@patch("usenet_poll.sabnzbd_queue")
+def test_promoted_file_with_missing_metadata_stays_pending_for_review(mock_queue, mock_history, mock_count, tmp_path):
+    """A metadata gap must NOT spawn a second review_items row -- the
+    promoted file sits at the exact path the original row's own `path`
+    UNIQUE constraint already owns, so a second INSERT there always
+    violates it. Instead the SAME row stays 'pending' (not 'resolved'),
+    flowing back through the normal review queue for a relabel/art fix."""
+    db_path = tmp_path / "review.db"
+    old_dir = tmp_path / "library" / "Bizzle" / "Nonstop"
+    row_id = _seed_searching_row(db_path, path=old_dir / "01.flac")
+    mock_queue.return_value = []
+    mock_count.return_value = 1
+
+    sab_dir = SABNZBD_PREFIX / "Some.Release.Folder"
+    real_sab_dir = tmp_path / "staging" / "Some.Release.Folder"
+    real_sab_dir.mkdir(parents=True)
+    _make_valid_flac(real_sab_dir / "01.flac")  # untagged, no art -- deliberate
+    mock_history.return_value = [
+        {"nzo_id": "nzo-1", "status": "Completed", "storage": str(sab_dir)},
+    ]
+    old_dir.mkdir(parents=True)
+    (old_dir / "01.flac").write_bytes(b"old-bad-rip")
+
+    result = _poll(db_path, tmp_path)
+
+    # The grab+promotion itself succeeded -- "resolved" counts the usenet
+    # side of this row finishing, independent of whether the row's own DB
+    # status ends up 'resolved' or stays 'pending' for a metadata fix.
+    assert result == {"resolved": 1, "still_searching": 0, "errors": 0}
+    conn = sqlite3.connect(str(db_path))
+    rows = conn.execute("SELECT id, status, reason, path FROM review_items").fetchall()
+    conn.close()
+    assert len(rows) == 1, "a metadata gap must reuse the same row, never spawn a second"
+
+    row = rows[0]
+    assert row[0] == row_id
+    assert row[1] == "pending"
+    assert "superseded old library files" in row[2]
+    assert "track(s) have gaps" in row[2]
+    assert "needs relabel/art fix" in row[2]
+    assert row[3] == str(old_dir / "01.flac")
+    # The promoted file is really there on disk, pending status or not.
+    assert (old_dir / "01.flac").exists()

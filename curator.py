@@ -22,6 +22,8 @@ from watchdog.events import FileSystemEventHandler
 import requests as http_requests
 import mutagen
 
+from lib.validator import check_metadata
+
 # ── Config ────────────────────────────────────────────────────────────────────
 
 LIBRARY_PATHS = [p for p in [
@@ -168,42 +170,10 @@ def check_integrity(path: Path):
         return f"integrity check error: {e}"
 
 # ── Metadata Inspection ───────────────────────────────────────────────────────
-
-def check_metadata(path: Path):
-    """Returns list of metadata issue strings."""
-    issues = []
-    try:
-        audio = mutagen.File(str(path), easy=True)
-        if audio is None:
-            return ["mutagen: unrecognized format"]
-        for tag in ["title", "artist", "album"]:
-            val = audio.get(tag, [])
-            if not val or not str(val[0]).strip():
-                issues.append(f"missing {tag}")
-
-        # Album art: check embedded, then folder
-        audio_raw = mutagen.File(str(path))
-        has_art = False
-        if audio_raw:
-            if hasattr(audio_raw, "pictures") and audio_raw.pictures:
-                has_art = True
-            elif hasattr(audio_raw, "tags") and audio_raw.tags:
-                has_art = any(k.startswith("APIC") for k in audio_raw.tags)
-            elif "covr" in (audio_raw or {}):
-                has_art = True
-
-        if not has_art:
-            album_dir = path.parent
-            folder_art_names = ["albumart", "cover", "folder", "front", "AlbumArt"]
-            has_folder_art = any(
-                list(album_dir.glob(f"{name}.*"))
-                for name in folder_art_names
-            )
-            if not has_folder_art:
-                issues.append("no album art (embedded or folder)")
-    except Exception as e:
-        issues.append(f"metadata error: {e}")
-    return issues
+# check_metadata moved to lib/validator.py 2026-10-31 so usenet_poll.py can
+# run the same check on usenet-acquired files before/after promotion --
+# previously only ingress-sweeper-routed files ever got checked for missing
+# tags/art. Imported below.
 
 # ── Stale Ingress ─────────────────────────────────────────────────────────────
 

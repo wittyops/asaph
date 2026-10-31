@@ -126,6 +126,38 @@ def _row_dict(row: tuple) -> dict:
     }
 
 
+def _outcome(reason: str) -> dict:
+    """Maps a resolved item's accumulated reason text to a single display
+    outcome -- reason strings are prose appended by usenet_poll.py /
+    review_queue.py's own routes over time (e.g. '[usenet grab complete,
+    superseded old library files] [metadata check: clean]'), not a fixed
+    enum, so this is substring matching, consistent with _categorize()
+    above. The full reason text is always shown alongside this badge too,
+    so nothing here needs to be exhaustive -- it's a scan aid, not the
+    only record of what happened."""
+    r = reason.lower()
+    if "superseded old library files" in r:
+        css, label = "validated", "Promoted"
+    elif "incomplete/partial" in r:
+        css, label = "corrupt", "Kept original"
+    elif "relabeled:" in r:
+        css, label = "usenet", "Relabeled"
+    elif "art selected:" in r:
+        css, label = "usenet", "Art added"
+    else:
+        css, label = "other", "Approved"
+    # Matches the original row's own appended suffix ("[metadata check:
+    # N/M track(s) have gaps: ...]", from usenet_poll.py's
+    # _check_promoted_metadata) -- NOT the separate flagged row's reason
+    # text ("usenet-acquired file has metadata gaps: ..."), which is a
+    # different row with its own _outcome() call.
+    if "track(s) have gaps" in r:
+        label += " + metadata flagged"
+        if css == "validated":
+            css = "metadata"
+    return {"css": css, "label": label}
+
+
 def _counts(conn):
     row = conn.execute(
         "SELECT "
@@ -152,6 +184,23 @@ def review_page():
     conn.close()
     items = [_row_dict(r) for r in rows]
     return render_template("review_queue.html", items=items, counts=counts, nav="review")
+
+
+@review_bp.route("/history")
+def history_page():
+    conn = _db()
+    rows = conn.execute(
+        "SELECT id, path, reason, status, artist, album, nzo_id, resolved_at "
+        "FROM review_items WHERE status='resolved' ORDER BY resolved_at DESC LIMIT 200"
+    ).fetchall()
+    conn.close()
+    items = []
+    for row in rows:
+        item = _row_dict(row)
+        item["resolved_at"] = row[7]
+        item["outcome"] = _outcome(row[2])
+        items.append(item)
+    return render_template("history.html", items=items, nav="history")
 
 
 @review_bp.route("/review/<int:item_id>/approve", methods=["POST"])

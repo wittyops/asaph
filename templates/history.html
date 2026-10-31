@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>History</h2>
+<p class="hint">Everything the pipeline has resolved, most recent first — what was chosen, whether it
+was promoted into the library, and whether its metadata came through clean. Last 200 shown.</p>
+<table>
+  <thead>
+    <tr>
+      <th>File</th>
+      <th>Outcome</th>
+      <th>Detail</th>
+      <th>Resolved</th>
+      <th></th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for item in items %}
+    <tr>
+      <td>
+        {{ item.filename }}
+        {% if item.artist or item.album %}<br><span class="path">{{ item.artist }}{% if item.artist and item.album %} — {% endif %}{{ item.album }}</span>{% endif %}
+      </td>
+      <td><span class="badge {{ item.outcome.css }}">{{ item.outcome.label }}</span></td>
+      <td class="path">{{ item.reason }}</td>
+      <td class="path">{{ item.resolved_at[:16].replace('T', ' ') if item.resolved_at else '' }}</td>
+      <td><a href="/review/{{ item.id }}">Detail</a></td>
+    </tr>
+    {% else %}
+    <tr class="empty-row"><td colspan="5">Nothing resolved yet.</td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

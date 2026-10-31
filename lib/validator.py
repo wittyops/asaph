@@ -1,8 +1,11 @@
-"""Shared audio validator — decode check, signal heuristic, checksum verify.
-
-Used by three callers: ingress-sweeper (move mode), the library health scan
-(read-only), and the usenet-import-validator. One implementation, not three.
-No network calls here — this module is pure local file analysis.
+"""Shared audio validator — decode check, signal heuristic, checksum verify,
+metadata check. Used by four callers: ingress-sweeper (move mode), the
+library health scan (read-only), curator.py's own periodic scan, and
+usenet_poll.py's post-promotion check (added 2026-10-31 -- usenet-acquired
+files were being promoted into the library on integrity/completeness alone,
+never checked for missing tags or album art the way ingress-sweeper-routed
+files are). One implementation, not four. No network calls here -- this
+module is pure local file analysis.
 """
 from __future__ import annotations
 
@@ -10,6 +13,8 @@ import re
 import subprocess
 import zlib
 from pathlib import Path
+
+import mutagen
 
 MIN_FILE_BYTES = 1024
 DECODE_TIMEOUT_S = 60
@@ -106,3 +111,55 @@ def checksum_verify(path: Path, sfv_path: Path | None) -> bool | None:
         return f"{crc & 0xFFFFFFFF:08x}" == expected
     except Exception:
         return None
+
+
+def check_metadata(path: Path) -> list[str]:
+    """Returns a list of metadata issue strings, empty when clean. Checks
+    title/artist/album tags and embedded (or folder) album art -- the same
+    gaps ingress-sweeper-routed files get checked for, now also run against
+    usenet-acquired files before/after promotion (see usenet_poll.py)."""
+    issues = []
+    try:
+        audio = mutagen.File(str(path), easy=True)
+        if audio is None:
+            return ["mutagen: unrecognized format"]
+        for tag in ["title", "artist", "album"]:
+            val = audio.get(tag, [])
+            if not val or not str(val[0]).strip():
+                issues.append(f"missing {tag}")
+
+        # Album art: check embedded, then folder
+        audio_raw = mutagen.File(str(path))
+        has_art = False
+        if audio_raw:
+            if hasattr(audio_raw, "pictures"):
+                # FLAC/OGG expose art via .pictures, never via ID3 APIC
+                # frames -- decide definitively here and never fall through
+                # to the APIC-tag branch below, which assumes .tags holds
+                # (key, value) string pairs. For FLAC specifically, .tags
+                # is a VComment -- a list of (key, value) TUPLES, not a
+                # dict of string keys -- so "k.startswith(...)" in that
+                # branch raised AttributeError on every FLAC with any
+                # Vorbis comment set and no embedded picture (i.e. most
+                # real FLAC files), silently misreported as a generic
+                # "metadata error" instead of the real "no album art"
+                # finding. Confirmed live 2026-10-31 while wiring this
+                # into usenet_poll.py's post-promotion check.
+                has_art = bool(audio_raw.pictures)
+            elif hasattr(audio_raw, "tags") and audio_raw.tags:
+                has_art = any(str(k).startswith("APIC") for k in audio_raw.tags)
+            elif "covr" in (audio_raw or {}):
+                has_art = True
+
+        if not has_art:
+            album_dir = path.parent
+            folder_art_names = ["albumart", "cover", "folder", "front", "AlbumArt"]
+            has_folder_art = any(
+                list(album_dir.glob(f"{name}.*"))
+                for name in folder_art_names
+            )
+            if not has_folder_art:
+                issues.append("no album art (embedded or folder)")
+    except Exception as e:
+        issues.append(f"metadata error: {e}")
+    return issues

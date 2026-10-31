@@ -10,7 +10,7 @@ sys.path.insert(0, str(Path(__file__).parent / "lib"))
 import mutagen
 import mutagen.flac
 from flask import Flask
-from review_queue import review_bp, REVIEW_DB_KEY
+from review_queue import review_bp, REVIEW_DB_KEY, _outcome
 
 JPEG_BYTES = b"\xff\xd8\xff\xe0" + b"\x00" * 64 + b"\xff\xd9"
 
@@ -76,6 +76,30 @@ def _make_app(db_path):
     app.config[REVIEW_DB_KEY] = db_path
     app.register_blueprint(review_bp)
     return app
+
+
+def _seed_resolved(db_path, tmp_path, reason, artist="Bizzle", album="Nonstop", name="resolved.flac"):
+    conn = sqlite3.connect(str(db_path))
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS review_items (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, path TEXT UNIQUE NOT NULL,
+            reason TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'pending',
+            flagged_at TEXT NOT NULL, resolved_at TEXT,
+            artist TEXT, album TEXT, nzo_id TEXT
+        )
+    """)
+    f = tmp_path / name
+    f.write_bytes(b"\x00" * 10)
+    now = datetime.now(timezone.utc).isoformat()
+    conn.execute(
+        "INSERT INTO review_items (path, reason, status, flagged_at, resolved_at, artist, album) "
+        "VALUES (?,?,?,?,?,?,?)",
+        (str(f), reason, "resolved", now, now, artist, album),
+    )
+    conn.commit()
+    row_id = conn.execute("SELECT id FROM review_items WHERE path=?", (str(f),)).fetchone()[0]
+    conn.close()
+    return row_id
 
 def test_review_page_lists_pending_items(tmp_path):
     db_path = tmp_path / "review.db"
@@ -381,3 +405,80 @@ def test_detail_hides_live_state_for_non_searching_item(tmp_path):
     resp = app.test_client().get(f"/review/{row_id}")
     assert resp.status_code == 200
     assert b"Next step" not in resp.data
+
+
+def test_outcome_promoted_clean():
+    outcome = _outcome("[usenet grab complete, superseded old library files] [metadata check: clean]")
+    assert outcome == {"css": "validated", "label": "Promoted"}
+
+
+def test_outcome_promoted_with_metadata_flagged():
+    outcome = _outcome(
+        "[usenet grab complete, superseded old library files] "
+        "[metadata check: 1/2 track(s) have gaps: missing title]"
+    )
+    assert outcome["css"] == "metadata"
+    assert "Promoted" in outcome["label"]
+    assert "metadata flagged" in outcome["label"]
+
+
+def test_outcome_kept_original_on_incomplete_grab():
+    outcome = _outcome("[usenet grab incomplete/partial -- left existing library file in place]")
+    assert outcome == {"css": "corrupt", "label": "Kept original"}
+
+
+def test_outcome_relabeled():
+    outcome = _outcome("missing title [relabeled: Bizzle/Nonstop/Warriors]")
+    assert outcome == {"css": "usenet", "label": "Relabeled"}
+
+
+def test_outcome_art_selected():
+    outcome = _outcome("no album art [art selected: abc-123]")
+    assert outcome == {"css": "usenet", "label": "Art added"}
+
+
+def test_outcome_default_approved():
+    outcome = _outcome("file too small")
+    assert outcome == {"css": "other", "label": "Approved"}
+
+
+def test_history_page_lists_resolved_items_most_recent_first(tmp_path):
+    db_path = tmp_path / "review.db"
+    first_id = _seed_resolved(
+        db_path, tmp_path,
+        "[usenet grab complete, superseded old library files] [metadata check: clean]",
+        name="first.flac",
+    )
+    second_id = _seed_resolved(
+        db_path, tmp_path,
+        "[usenet grab incomplete/partial -- left existing library file in place]",
+        name="second.flac",
+    )
+    app = _make_app(db_path)
+    resp = app.test_client().get("/history")
+    assert resp.status_code == 200
+    body = resp.data.decode()
+    assert "first.flac" in body
+    assert "second.flac" in body
+    assert "Promoted" in body
+    assert "Kept original" in body
+
+
+def test_history_page_empty_state(tmp_path):
+    db_path = tmp_path / "review.db"
+    _seed_db(db_path, tmp_path)  # creates the table; leaves one 'pending' row (not resolved)
+    app = _make_app(db_path)
+    resp = app.test_client().get("/history")
+    assert resp.status_code == 200
+    assert b"Nothing resolved yet" in resp.data
+
+
+def test_history_page_excludes_pending_and_searching_items(tmp_path):
+    db_path = tmp_path / "review.db"
+    _seed_db(db_path, tmp_path)  # status='pending'
+    resolved_id = _seed_resolved(db_path, tmp_path, "[usenet grab complete, superseded old library files]")
+    app = _make_app(db_path)
+    resp = app.test_client().get("/history")
+    body = resp.data.decode()
+    assert "bad.flac" not in body
+    assert "resolved.flac" in body

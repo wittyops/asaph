@@ -2,7 +2,7 @@
 
 All notable changes to Asaph (the Wittycomp Lab music curator) are tracked here.
 
-## [2.0.0] — 2026-10-29, live/deployed (not yet tagged)
+## [2.0.0] — 2026-10-29, live/deployed, tagged 2026-10-31
 
 Major version jump marking Asaph's expansion from a passive health-checker into
 a full audio ingress pipeline: shared validator (decode-check + signal-heuristic

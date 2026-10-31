@@ -115,3 +115,17 @@ def test_poll_watchlist_ignores_releases_without_download_url(mock_search, tmp_p
     _seed_watchlist(db_path, "Burial", "")
     summary = poll_watchlist(db_path, "http://prowlarr:9696", "fakekey")
     assert summary["new_candidates"] == 0
+
+
+@patch("watchlist_poll.search_prowlarr")
+def test_poll_watchlist_scoped_to_one_entry_skips_others(mock_search, tmp_path):
+    mock_search.return_value = []
+    db_path = tmp_path / "review.db"
+    _seed_watchlist(db_path, "Burial", "")
+    _seed_watchlist(db_path, "Chaka Khan", "")
+    summary = poll_watchlist(
+        db_path, "http://prowlarr:9696", "fakekey",
+        only_artist="Burial", only_album="",
+    )
+    assert summary["checked"] == 1
+    mock_search.assert_called_once_with("Burial", "", "http://prowlarr:9696", "fakekey")

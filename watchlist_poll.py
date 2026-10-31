@@ -19,11 +19,24 @@ from pathlib import Path
 from usenet_flow import guess_artist_album, search_prowlarr
 
 
-def poll_watchlist(db_path: Path, prowlarr_base: str, api_key: str) -> dict:
+def poll_watchlist(
+    db_path: Path, prowlarr_base: str, api_key: str,
+    only_artist: str | None = None, only_album: str | None = None,
+) -> dict:
+    """Polls every watch entry by default. Pass only_artist (and, for an
+    album-specific watch, only_album) to scope this to a single entry --
+    used right after adding one, so the person doesn't wait for the next
+    scheduled cycle (hours away) to see whether anything already exists."""
     conn = sqlite3.connect(str(db_path), timeout=30)
-    entries = conn.execute(
-        "SELECT id, artist, album FROM watchlist"
-    ).fetchall()
+    if only_artist is not None:
+        entries = conn.execute(
+            "SELECT id, artist, album FROM watchlist WHERE artist=? AND album=?",
+            (only_artist, only_album or ""),
+        ).fetchall()
+    else:
+        entries = conn.execute(
+            "SELECT id, artist, album FROM watchlist"
+        ).fetchall()
 
     summary = {"checked": 0, "new_candidates": 0, "errors": 0}
     now = datetime.now(timezone.utc).isoformat()

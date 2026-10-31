@@ -18,6 +18,7 @@ from markupsafe import escape
 
 from ingress_sweeper import sanitize
 from usenet_flow import grab_release
+from watchlist_poll import poll_watchlist
 
 watchlist_bp = Blueprint("watchlist", __name__, template_folder="templates")
 
@@ -86,6 +87,17 @@ def watchlist_add():
         conn.close()
         return '<p class="result-msg">Already on the watchlist.</p>', 200
     conn.close()
+
+    # Check immediately instead of leaving it to the next scheduled cycle
+    # (hours away) -- a newly-added entry should show what's already out
+    # there right now, not force a wait. Scoped to this one entry so adding
+    # to a large watchlist doesn't block the response on every other
+    # entry's Prowlarr search too.
+    db_path = Path(current_app.config["REVIEW_DB_PATH"])
+    poll_watchlist(
+        db_path, current_app.config["PROWLARR_BASE"], current_app.config["PROWLARR_API_KEY"],
+        only_artist=artist, only_album=album,
+    )
     return _render_content()
 
 

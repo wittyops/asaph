@@ -679,6 +679,18 @@ if __name__ == "__main__":
         ),
         "interval", hours=WATCHLIST_INTERVAL_HOURS, id="watchlist_poll",
     )
+    # APScheduler's "interval" trigger waits a full interval before its
+    # first run -- without this, an entry added right before a restart
+    # (or one added via the UI before this fix, when adding didn't poll
+    # immediately) would sit unchecked for up to WATCHLIST_INTERVAL_HOURS.
+    # Same pattern as initial_scan above.
+    scheduler.add_job(
+        lambda: poll_watchlist(
+            REVIEW_DB, app.config["PROWLARR_BASE"], app.config["PROWLARR_API_KEY"],
+        ),
+        "date", run_date=datetime.now() + timedelta(minutes=2),
+        id="initial_watchlist_poll",
+    )
 
     scheduler.start()
 

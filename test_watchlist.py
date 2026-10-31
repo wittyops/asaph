@@ -17,6 +17,8 @@ def _make_app(db_path, library_root):
     init_review_db(db_path)
     app = Flask(__name__, template_folder=str(Path(__file__).parent / "templates"))
     app.config[REVIEW_DB_KEY] = db_path
+    app.config["PROWLARR_BASE"] = "http://prowlarr:9696"
+    app.config["PROWLARR_API_KEY"] = "fakeprowlarrkey"
     app.config["SABNZBD_BASE"] = "http://wn-sabnzbd-01:8080"
     app.config["SABNZBD_API_KEY"] = "fakesabkey"
     app.config["SABNZBD_CATEGORY"] = "asaph-staging"
@@ -63,7 +65,8 @@ def test_watchlist_page_renders_empty(tmp_path):
     assert b"Nothing new found yet" in resp.data
 
 
-def test_watchlist_add_creates_entry(tmp_path):
+@patch("watchlist.poll_watchlist")
+def test_watchlist_add_creates_entry(mock_poll, tmp_path):
     db_path = tmp_path / "review.db"
     app = _make_app(db_path, tmp_path / "library")
     resp = app.test_client().post("/watchlist/add", data={"artist": "Burial", "album": ""})
@@ -75,6 +78,17 @@ def test_watchlist_add_creates_entry(tmp_path):
     assert row == ("Burial", "")
 
 
+@patch("watchlist.poll_watchlist")
+def test_watchlist_add_checks_immediately_scoped_to_new_entry(mock_poll, tmp_path):
+    db_path = tmp_path / "review.db"
+    app = _make_app(db_path, tmp_path / "library")
+    app.test_client().post("/watchlist/add", data={"artist": "Burial", "album": "Kindred"})
+    mock_poll.assert_called_once()
+    args, kwargs = mock_poll.call_args
+    assert kwargs["only_artist"] == "Burial"
+    assert kwargs["only_album"] == "Kindred"
+
+
 def test_watchlist_add_requires_artist(tmp_path):
     app = _make_app(tmp_path / "review.db", tmp_path / "library")
     resp = app.test_client().post("/watchlist/add", data={"artist": "", "album": "Kindred"})
@@ -82,7 +96,8 @@ def test_watchlist_add_requires_artist(tmp_path):
     assert b"Artist is required" in resp.data
 
 
-def test_watchlist_add_duplicate_returns_friendly_message(tmp_path):
+@patch("watchlist.poll_watchlist")
+def test_watchlist_add_duplicate_returns_friendly_message(mock_poll, tmp_path):
     db_path = tmp_path / "review.db"
     app = _make_app(db_path, tmp_path / "library")
     client = app.test_client()

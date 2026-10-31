@@ -3,9 +3,9 @@
 {% elif results|length == 0 %}
 <p class="result-msg">No usenet results for {{ [artist, album]|select|join(' / ') }}.</p>
 {% else %}
-<p class="hint">Confirm the artist/album for each release before grabbing — this is what
-the library path and automatic completeness check will use, so it needs to be accurate
-even if your search only used one of the two fields.</p>
+<p class="hint">Artist/album is guessed from each release's own title, so most rows
+should already be correct — double-check before grabbing, since this is what the
+library path and automatic completeness check will use.</p>
 <table>
   <thead>
     <tr>
@@ -36,8 +36,8 @@ even if your search only used one of the two fields.</p>
           hx-vals='{"download_url": {{ r.downloadUrl|tojson }}}'
           style="display:flex;gap:6px;align-items:center;margin:0;"
         >
-          <input type="text" name="artist" placeholder="artist (required)" value="{{ artist }}" required style="width:90px">
-          <input type="text" name="album" placeholder="album (required)" value="{{ album }}" required style="width:90px">
+          <input type="text" name="artist" placeholder="artist (required)" value="{{ r.guess_artist }}" required style="width:90px">
+          <input type="text" name="album" placeholder="album (required)" value="{{ r.guess_album }}" required style="width:90px">
           <button type="submit" class="approve">Grab</button>
         </form>
       </td>

@@ -22,7 +22,7 @@ from flask import Blueprint, current_app, render_template, request
 from markupsafe import escape
 
 from ingress_sweeper import sanitize
-from usenet_flow import grab_release, is_lossless, search_prowlarr
+from usenet_flow import grab_release, guess_artist_album, is_lossless, search_prowlarr
 
 acquire_bp = Blueprint("acquire", __name__, template_folder="templates")
 
@@ -56,6 +56,17 @@ def acquire_search():
     # own auto-pick logic (used by the review queue's one-click grab) is
     # untouched by this.
     releases = sorted(releases, key=lambda r: (not is_lossless(r), -(r.get("size") or 0)))
+
+    # Per-release smart-fill: each result's own title usually pins down the
+    # piece the search terms left ambiguous (e.g. an artist-only search
+    # still needs an album before grab() can work). Falls back to the raw
+    # search terms when the heuristic can't confidently place a field, so
+    # this never leaves a row worse off than the old uniform-fill behavior.
+    for r in releases:
+        guessed_artist, guessed_album = guess_artist_album(r.get("title", ""), artist, album)
+        r["guess_artist"] = guessed_artist or artist
+        r["guess_album"] = guessed_album or album
+
     return render_template(
         "_acquire_results.html", results=releases, artist=artist, album=album, error=None,
     )

@@ -7,6 +7,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 from usenet_flow import (
     check_completeness,
     grab_release,
+    guess_artist_album,
     pick_best_release,
     remap_sabnzbd_path,
     rename_into_staging_layout,
@@ -219,3 +220,72 @@ def test_supersede_archives_old_and_promotes_new(tmp_path):
     archived = list(archive_root.rglob("01.flac"))
     assert len(archived) == 1
     assert archived[0].read_bytes() == b"old"
+
+
+def test_guess_artist_album_infers_album_from_known_artist():
+    title = "Burial-Kindred-16BIT-44-KHZ-WEB-FLAC-2012-WALKMAN-xpost"
+    artist, album = guess_artist_album(title, known_artist="Burial")
+    assert artist == "Burial"
+    assert album == "Kindred"
+
+
+def test_guess_artist_album_handles_spaced_dash_and_parenthetical_year():
+    title = "Burial - Street Halo Kindred (2012) FLAC"
+    artist, album = guess_artist_album(title, known_artist="Burial")
+    assert artist == "Burial"
+    assert album == "Street Halo Kindred"
+
+
+def test_guess_artist_album_strips_catalog_number_parenthetical():
+    title = "Burial-Street Halo Kindred-(BRC320)-CD-FLAC-2012-SPL"
+    artist, album = guess_artist_album(title, known_artist="Burial")
+    assert artist == "Burial"
+    assert album == "Street Halo Kindred"
+
+
+def test_guess_artist_album_infers_artist_from_known_album():
+    title = "Burial - Street Halo Kindred (2012) FLAC"
+    artist, album = guess_artist_album(title, known_album="Street Halo Kindred")
+    assert artist == "Burial"
+    assert album == "Street Halo Kindred"
+
+
+def test_guess_artist_album_splits_both_from_dash_when_neither_known():
+    title = "Burial - Street Halo Kindred (2012) FLAC"
+    artist, album = guess_artist_album(title)
+    assert artist == "Burial"
+    assert album == "Street Halo Kindred"
+
+
+def test_guess_artist_album_splits_both_from_bare_dash_scene_name():
+    title = "Burial-Kindred-16BIT-44-KHZ-WEB-FLAC-2012-WALKMAN-xpost"
+    artist, album = guess_artist_album(title)
+    assert artist == "Burial"
+    assert album == "Kindred"
+
+
+def test_guess_artist_album_handles_dotted_scene_release_name():
+    title = "Chaka.Khan-Epiphany-The.Best.Of.Chaka.Khan.Vol.1-CD-FLAC-1996-PERFECT-1"
+    artist, album = guess_artist_album(title, known_artist="Chaka Khan")
+    assert artist == "Chaka Khan"
+    assert album == "Epiphany-The Best Of Chaka Khan Vol 1"
+
+
+def test_guess_artist_album_returns_empty_when_known_artist_not_in_title():
+    artist, album = guess_artist_album("Totally Unrelated Title", known_artist="Burial")
+    assert artist == "Burial"
+    assert album == ""
+
+
+def test_guess_artist_album_returns_both_empty_with_no_separator_and_nothing_known():
+    artist, album = guess_artist_album("NoSeparatorHere")
+    assert artist == ""
+    assert album == ""
+
+
+def test_guess_artist_album_passes_through_when_both_already_known():
+    artist, album = guess_artist_album(
+        "irrelevant title text", known_artist="Burial", known_album="Kindred"
+    )
+    assert artist == "Burial"
+    assert album == "Kindred"

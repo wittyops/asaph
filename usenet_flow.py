@@ -18,6 +18,7 @@ has never indexed. None of these constraints apply to the Prowlarr+
 SABnzbd design below, because Lidarr is no longer in the loop at all."""
 from __future__ import annotations
 
+import re
 import shutil
 from pathlib import Path
 
@@ -29,6 +30,73 @@ from lib.validator import decode_check
 AUDIO_EXTENSIONS = {".flac", ".mp3", ".m4a", ".ogg", ".opus", ".wav", ".aac"}
 HTTP_TIMEOUT_S = 15
 LOSSLESS_CATEGORY_ID = 3040
+
+# Scene-release naming has a handful of common conventions ("Artist - Album
+# (Year) Format", "Artist-Album-Quality-Format-Year-Group") but no fixed
+# grammar, so this is a heuristic boundary marker, not a parser: anything
+# from the first match onward is quality/format/year/release-group noise,
+# never part of the artist or album.
+_RELEASE_NOISE_MARKERS = re.compile(
+    r"\b(FLAC|MP3|ALAC|WAV|APE|OGG|OPUS|CD|WEB|VINYL|DVD|SACD|NMR|DELUXE|"
+    r"REMASTER(?:ED)?|BOOTLEG|PROPER|REPACK|RETAIL|LIMITED|EDITION|"
+    r"\d{2,4}KBPS|\d{2,3}KHZ|\d{1,2}BIT|19\d{2}|20\d{2})\b",
+    re.IGNORECASE,
+)
+
+
+def _truncate_at_release_noise(text: str) -> str:
+    """Cuts a title fragment at the first format/year/catalog-number marker
+    (an opening paren counts too -- that's almost always a year or a
+    catalog number like "(BRC320)", never album text)."""
+    cut = len(text)
+    paren_idx = text.find("(")
+    if paren_idx != -1:
+        cut = min(cut, paren_idx)
+    m = _RELEASE_NOISE_MARKERS.search(text)
+    if m:
+        cut = min(cut, m.start())
+    return text[:cut].strip(" -:").strip()
+
+
+def guess_artist_album(title: str, known_artist: str = "", known_album: str = "") -> tuple[str, str]:
+    """Best-effort split of a scene-style release title into (artist, album),
+    for prefilling the acquire page's per-row fields so a reviewer doesn't
+    have to type both by hand for every result. Not a parser -- scene
+    release names don't follow one fixed grammar -- so this is a heuristic
+    that degrades to ('', '') on anything it can't confidently place.
+    Callers must treat an empty string as 'leave it for the user to fill
+    in,' never as a value safe to grab on.
+
+    - If the caller already knows the artist (typed it into the search),
+      that string is trusted over any guess and only the album is inferred
+      by locating the artist in the title and reading the field after it.
+    - Symmetric for a known album.
+    - If neither is known, the title is split on the first "Artist - Album"
+      or "Artist-Album" separator."""
+    clean = re.sub(r"\s+", " ", title.replace(".", " ")).strip()
+    artist = known_artist.strip()
+    album = known_album.strip()
+
+    if artist and not album:
+        idx = clean.lower().find(artist.lower())
+        if idx != -1:
+            rest = clean[idx + len(artist):].lstrip(" -:")
+            album = _truncate_at_release_noise(rest)
+    elif album and not artist:
+        idx = clean.lower().find(album.lower())
+        if idx != -1:
+            artist = clean[:idx].rstrip(" -:")
+    elif not artist and not album:
+        if " - " in clean:
+            left, _, rest = clean.partition(" - ")
+        elif "-" in clean:
+            left, _, rest = clean.partition("-")
+        else:
+            return "", ""
+        artist = left.strip()
+        album = _truncate_at_release_noise(rest.strip())
+
+    return artist, album
 
 
 def search_prowlarr(artist: str, album: str, prowlarr_base: str, api_key: str) -> list[dict]:

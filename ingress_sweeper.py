@@ -221,20 +221,34 @@ def canonical_dest(library_root: Path, tags: dict, ext: str) -> Path:
     return library_root / rel_dir / filename
 
 
-def existing_dupe(dest: Path, src_duration: float | None) -> Path | None:
+def existing_dupe(dest: Path, src_duration: float | None, src_title: str | None) -> Path | None:
     if dest.exists():
         return dest
     if src_duration is None:
         return None
     # Same artist+title dir, different extension/track-number formatting —
-    # check siblings by duration (±2s) before declaring a dupe.
+    # check siblings by duration (±2s) AND matching title before declaring a
+    # dupe. Duration alone is NOT enough: an album's tracks routinely land
+    # within 2s of each other's length, so a duration-only check false-
+    # positived on nearly every track of a multi-track album, silently
+    # stranding genuinely new/different songs in ingress/ forever (found
+    # 2026-11-02: 244/248 tracks of a real transfer skipped as "dupes" of
+    # unrelated tracks, 0 moved). Title is the actual identity signal; an
+    # untitled sibling (rare, already-quarantined-worthy on its own) can't
+    # be compared, so it's skipped rather than treated as a false match.
     if not dest.parent.is_dir():
+        return None
+    src_title_norm = sanitize(src_title).casefold() if src_title else None
+    if src_title_norm is None:
         return None
     for sibling in dest.parent.iterdir():
         if sibling.suffix.lower() not in AUDIO_EXTS:
             continue
         dur = probe_duration(sibling)
-        if dur is not None and abs(dur - src_duration) <= 2.0:
+        if dur is None or abs(dur - src_duration) > 2.0:
+            continue
+        sibling_title = read_tags(sibling).get("title")
+        if sibling_title and sanitize(sibling_title).casefold() == src_title_norm:
             return sibling
     return None
 
@@ -315,7 +329,7 @@ def sweep(ingress_root: Path, library_root: Path, live: bool,
             continue
 
         dest = canonical_dest(library_root, tags, path.suffix.lower())
-        dupe = existing_dupe(dest, tags.get("duration"))
+        dupe = existing_dupe(dest, tags.get("duration"), tags.get("title"))
         if dupe is not None:
             report.add(Item(path, "skipped-dupe", f"matches existing {dupe}", dest=dupe))
             continue

@@ -103,6 +103,60 @@ def test_live_mode_flags_quarantined_item_in_review_db(tmp_path):
     assert row[2] == "pending"
 
 
+def test_same_duration_different_title_is_not_a_dupe(tmp_path):
+    """Regression for 2026-11-02: existing_dupe() matched on duration alone,
+    so any two same-length tracks in the same album dir (routine for a real
+    album) false-positived as duplicates -- a real transfer saw 244/248
+    tracks skipped this way, 0 moved. Two different, same-length tracks by
+    the same artist/album must both move."""
+    ingress = tmp_path / "ingress"
+    library = tmp_path / "library"
+    ingress.mkdir()
+    library.mkdir()
+
+    # Pre-existing library track: same artist/album, same duration, DIFFERENT title.
+    existing_dir = library / "Test Artist" / "Test Album"
+    existing_dir.mkdir(parents=True)
+    _make_tagged_flac(existing_dir / "01 - Existing Track.flac",
+                       title="Existing Track", artist="Test Artist")
+
+    # Incoming: same artist/album/duration, but a genuinely different song.
+    incoming = ingress / "New Track.flac"
+    _make_tagged_flac(incoming, title="New Track", artist="Test Artist")
+    (ingress / "cover.jpg").write_bytes(b"\xff\xd8\xff\xe0fakejpeg")
+
+    report = sweep(ingress, library, live=True)
+
+    assert len(report.skipped_dupe) == 0, \
+        f"false-positive dupe match: {[ (i.src, i.reason) for i in report.skipped_dupe ]}"
+    assert len(report.moved) == 1
+    assert report.moved[0].dest.exists()
+
+
+def test_same_duration_same_title_different_extension_is_a_dupe(tmp_path):
+    """The case existing_dupe() is actually meant to catch: the same track
+    re-encoded/re-tagged with a different filename/extension landing in the
+    same album dir. Must still be correctly skipped."""
+    ingress = tmp_path / "ingress"
+    library = tmp_path / "library"
+    ingress.mkdir()
+    library.mkdir()
+
+    existing_dir = library / "Test Artist" / "Test Album"
+    existing_dir.mkdir(parents=True)
+    _make_tagged_flac(existing_dir / "01 - Same Track.flac",
+                       title="Same Track", artist="Test Artist")
+
+    incoming = ingress / "Same Track (re-rip).flac"
+    _make_tagged_flac(incoming, title="Same Track", artist="Test Artist")
+    (ingress / "cover.jpg").write_bytes(b"\xff\xd8\xff\xe0fakejpeg")
+
+    report = sweep(ingress, library, live=True)
+
+    assert len(report.moved) == 0
+    assert len(report.skipped_dupe) == 1
+
+
 def test_dry_run_does_not_write_review_db(tmp_path):
     """Dry-run means 'report only, nothing written' -- that contract covers
     the review DB too, not just the ingress/library filesystem moves. No DB

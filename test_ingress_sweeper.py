@@ -133,6 +133,38 @@ def test_same_duration_different_title_is_not_a_dupe(tmp_path):
     assert report.moved[0].dest.exists()
 
 
+def test_wrong_embedded_tag_but_correct_filename_is_still_a_dupe(tmp_path):
+    """Regression for 2026-11-02, found while recovering the tracks from the
+    first dedup-bug fix: a real re-run still false-positived on ~150 tracks
+    because several existing library albums carry WRONG embedded title tags
+    (confirmed: both Kraftwerk "3-D" box-set editions, several Vangelis
+    albums, Fleetwood Mac's live albums) from imports that predate this
+    pipeline. The filename itself is usually still correct. A genuine dupe
+    whose library-side tag is wrong but whose filename is right must still
+    be caught (not re-imported as a false "new" track)."""
+    ingress = tmp_path / "ingress"
+    library = tmp_path / "library"
+    ingress.mkdir()
+    library.mkdir()
+
+    existing_dir = library / "Test Artist" / "Test Album"
+    existing_dir.mkdir(parents=True)
+    # Filename says "Real Title", but the embedded tag (simulating an old,
+    # bad import) says something else entirely.
+    _make_tagged_flac(existing_dir / "Real Title.flac",
+                       title="Totally Different Scrambled Tag", artist="Test Artist")
+
+    incoming = ingress / "Real Title.flac"
+    _make_tagged_flac(incoming, title="Real Title", artist="Test Artist")
+    (ingress / "cover.jpg").write_bytes(b"\xff\xd8\xff\xe0fakejpeg")
+
+    report = sweep(ingress, library, live=True)
+
+    assert len(report.moved) == 0, \
+        f"should have been caught as a dupe via filename, not re-imported: {report.moved}"
+    assert len(report.skipped_dupe) == 1
+
+
 def test_same_duration_same_title_different_extension_is_a_dupe(tmp_path):
     """The case existing_dupe() is actually meant to catch: the same track
     re-encoded/re-tagged with a different filename/extension landing in the

@@ -73,6 +73,25 @@ IGNORE_DIR_NAMES = {".metube", ".stfolder", ".stversions", ".thumbnails",
 _UNSAFE = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
 _COLON_SUB = "："
 
+# canonical_dest()'s own track-number prefix pattern ("01 - ", "01-02 - "),
+# used in reverse by _filename_title() to recover the title portion of an
+# existing library filename for comparison.
+_TRACK_PREFIX = re.compile(r"^\s*\d+(-\d+)?\s*-\s*")
+
+
+def _filename_title(path: Path) -> str:
+    """Best-effort title extracted from a filename alone, stripping any
+    leading track-number prefix and the extension. Used as a fallback dupe
+    signal alongside the embedded tag -- a file's embedded TITLE tag can be
+    wrong (confirmed 2026-11-02: several existing library albums, e.g. both
+    Kraftwerk "3-D" box-set editions, carry scrambled/mismatched title tags
+    from however they were originally imported, long before this pipeline
+    existed), but the filename itself is far more often accurate, since
+    it's usually set once at rip/download time and never silently
+    re-tagged after."""
+    stem = _TRACK_PREFIX.sub("", path.stem)
+    return sanitize(stem).casefold()
+
 
 def sanitize(name: str) -> str:
     name = unicodedata.normalize("NFC", name).strip()
@@ -247,8 +266,23 @@ def existing_dupe(dest: Path, src_duration: float | None, src_title: str | None)
         dur = probe_duration(sibling)
         if dur is None or abs(dur - src_duration) > 2.0:
             continue
+        # Match on EITHER the embedded tag OR the filename-derived title.
+        # Found 2026-11-02, same session as the duration-only bug above: a
+        # real run with the tag-only check still false-positived on ~150
+        # genuinely different tracks, because a handful of existing library
+        # albums (both Kraftwerk "3-D" box-set editions, several Vangelis
+        # albums, Fleetwood Mac's two live albums, the YouTube Music/
+        # Non-Album catch-all) carry embedded title tags that don't match
+        # their own filenames -- pre-existing data quality from imports
+        # that predate this pipeline, not something this script caused.
+        # The filename is the more reliable signal for those files; for
+        # files where the tag IS reliable, this is simply a second vote
+        # that doesn't hurt (both will normally agree). Either signal
+        # matching is enough to call it a real duplicate.
         sibling_title = read_tags(sibling).get("title")
-        if sibling_title and sanitize(sibling_title).casefold() == src_title_norm:
+        tag_match = bool(sibling_title) and sanitize(sibling_title).casefold() == src_title_norm
+        filename_match = _filename_title(sibling) == src_title_norm
+        if tag_match or filename_match:
             return sibling
     return None
 
